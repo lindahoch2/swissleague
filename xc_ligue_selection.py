@@ -14,6 +14,8 @@ import argparse
 import sys
 import difflib
 import pandas as pd
+from openpyxl.styles import PatternFill
+from datetime import datetime
 
 
 def load_excel_file(path, engine='openpyxl', sheet_name=0):
@@ -309,8 +311,71 @@ def run_selection(args):
 
 	# save combined to a new Excel file
 	output_path = Path(args.base_dir) / 'combined_selection.xlsx'
-	combined.to_excel(output_path, index=False)
+	_save_with_coloring(output_path, combined, sex_col='Sex')
 	print(f"Combined selection saved to: {output_path.resolve()}")
+
+
+def _save_with_coloring(path, df, sex_col='Sex', birthdate_col='Birthdate'):
+	"""Save DataFrame to Excel and color rows:
+
+	- red for pilots who are U26 in the next year (born in or after cutoff year)
+	- green for pilots whose sex is 'f' or 'w' (case-insensitive)
+
+	Red takes precedence over green when both apply.
+	"""
+	p = Path(path)
+	# fills
+	green_fill = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
+	red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+
+	# compute U26 mask based on birth year >= (next_year - 26)
+	next_year = datetime.now().year + 1
+	cutoff_year = next_year - 26
+
+	# safely parse birthdates (day-first) and compute mask
+	if birthdate_col in df.columns:
+		bd = pd.to_datetime(df[birthdate_col], dayfirst=True, errors='coerce')
+		birth_year = bd.dt.year
+		is_u26 = birth_year.ge(cutoff_year)
+	else:
+		is_u26 = pd.Series([False] * len(df))
+
+	# female/woman mask
+	if sex_col in df.columns:
+		is_female = df[sex_col].astype(str).fillna('').str.strip().str.lower().isin(('f', 'w'))
+	else:
+		is_female = pd.Series([False] * len(df))
+
+	# write DataFrame to Excel
+	with pd.ExcelWriter(p, engine='openpyxl') as writer:
+		df.to_excel(writer, index=False, sheet_name='Sheet1')
+		writer.book.save(p)
+
+	# reopen workbook and apply fills by row using masks computed above
+	from openpyxl import load_workbook
+	wb = load_workbook(p)
+	ws = wb.active
+
+	# map column names to 1-based column indices based on df.columns order
+	col_index = {col: i + 1 for i, col in enumerate(df.columns)}
+
+	# iterate DataFrame rows in order and apply fills
+	for i in range(len(df)):
+		row_idx = i + 2  # Excel data rows start at 2
+		try:
+			if bool(is_u26.iat[i]):
+				# color whole row red
+				for col_idx in range(1, ws.max_column + 1):
+					ws.cell(row=row_idx, column=col_idx).fill = red_fill
+				continue
+			if bool(is_female.iat[i]):
+				for col_idx in range(1, ws.max_column + 1):
+					ws.cell(row=row_idx, column=col_idx).fill = green_fill
+		except IndexError:
+			# mismatch lengths or empty df; skip
+			continue
+
+	wb.save(p)
 
 
 def main(argv=None):
