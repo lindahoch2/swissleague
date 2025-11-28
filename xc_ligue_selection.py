@@ -309,6 +309,9 @@ def run_selection(args):
 		fuzzy_interactive=getattr(args, 'interactive', True),
 	)
 
+	# assign Selektion column based on XC values and ordered rules
+	combined = _assign_selection(combined, xc_col='XC', selection_col='Selektion')
+
 	# save combined to a new Excel file
 	output_path = Path(args.base_dir) / 'combined_selection.xlsx'
 	_save_with_coloring(output_path, combined, sex_col='Sex')
@@ -376,6 +379,79 @@ def _save_with_coloring(path, df, sex_col='Sex', birthdate_col='Birthdate'):
 			continue
 
 	wb.save(p)
+
+
+def _assign_selection(df, xc_col='XC', selection_col='Selektion', a_count=20, b_count=20, c_count=40):
+	"""Assign a `selection_col` on the DataFrame according to rules:
+
+	- First `a_count` rows with XC == 'A/B Cadre' -> 'A'
+	- Next `b_count` rows with XC == 'A/B Cadre' -> 'B'
+	- Next `c_count` rows from rows with XC in {'A/B Cadre', 'C Cadre'} (excluding
+	  those already assigned A/B) -> 'C'.
+
+	After that:
+	- Any remaining rows with XC == 'Passive' -> 'Passive'
+	- Any remaining rows with XC in {'C Cadre', 'Guest'} -> 'Guest'
+
+	All checks are case-insensitive and whitespace-trimmed. The function returns
+	a new DataFrame (copy) with the added/updated selection_col.
+	"""
+	df = df.copy()
+	# ensure selection column exists
+	df[selection_col] = None
+
+	# normalized XC values
+	if xc_col in df.columns:
+		xc = df[xc_col].astype(str).fillna('').str.strip().str.lower()
+	else:
+		xc = pd.Series([''] * len(df))
+
+	is_ab = xc == 'a/b cadre'
+	is_c = xc == 'c cadre'
+	is_guest = xc == 'guest'
+	is_passive = xc == 'passive'
+
+	# indices in original order
+	indices_ab = df[is_ab].index.tolist()
+
+	assigned = set()
+	# assign A
+	for idx in indices_ab[:a_count]:
+		df.at[idx, selection_col] = 'A'
+		assigned.add(idx)
+
+	# assign B
+	for idx in indices_ab[a_count:a_count + b_count]:
+		df.at[idx, selection_col] = 'B'
+		assigned.add(idx)
+
+	# eligible for C: rows with AB or C cadre (in order), but skip already assigned
+	eligible_c = df[(is_ab | is_c)].index.tolist()
+	c_assigned = 0
+	for idx in eligible_c:
+		if idx in assigned:
+			continue
+		if c_assigned >= c_count:
+			break
+		df.at[idx, selection_col] = 'C'
+		assigned.add(idx)
+		c_assigned += 1
+
+	# Remaining rows with C Cadre or Guest -> 'Guest'
+	for idx in df[(is_ab | is_c | is_guest)].index.tolist():
+		if idx in assigned:
+			continue
+		df.at[idx, selection_col] = 'Guest'
+		assigned.add(idx)
+		
+	# After A/B/C assignment: Passive -> 'Passive'
+	for idx in df[is_passive].index.tolist():
+		if idx in assigned:
+			continue
+		df.at[idx, selection_col] = 'Passive'
+		assigned.add(idx)
+
+	return df
 
 
 def main(argv=None):
