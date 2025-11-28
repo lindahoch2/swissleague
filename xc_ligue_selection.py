@@ -75,11 +75,166 @@ def drop_rows_where_xc_none(df, xc_col='XC'):
 	return df[df[xc_col].notna()].copy()
 
 
+def _norm(s):
+	"""Normalize a value to a lowercase stripped string for matching."""
+	return (str(s) if pd.notna(s) else '').strip().lower()
+
+
+def _build_lookups(signups_df, signup_first_col, signup_last_col, columns_to_add):
+	"""Return (_signups, right, right_lookup, full_lookup, right_cols).
+
+	- _signups: copy of signups_df with '__key'
+	- right: DataFrame indexed by __key with the requested right-side columns
+	- right_lookup: dict mapping __key -> {col: val}
+	- full_lookup: dict mapping 'firstname lastname' -> (__key, {col: val})
+	- right_cols: list of columns actually present to bring across
+	"""
+	_signups = signups_df.copy()
+	_signups['__key'] = _signups[signup_first_col].apply(_norm) + '|' + _signups[signup_last_col].apply(_norm)
+
+	# which columns are available on the right side
+	right_cols = [c for c in columns_to_add if c in _signups.columns]
+
+	if right_cols:
+		right = _signups.set_index('__key')[right_cols].groupby(level=0).first()
+	else:
+		right = pd.DataFrame(columns=columns_to_add)
+
+	right_lookup = right.to_dict(orient='index') if not right.empty else {}
+
+	# full lookup uses normalized "firstname lastname"
+	full_lookup = {}
+	for _, su in _signups.iterrows():
+		f_s = _norm(su.get(signup_first_col))
+		l_s = _norm(su.get(signup_last_col))
+		full_key = f_s + ' ' + l_s
+		if full_key not in full_lookup:
+			full_lookup[full_key] = (su.get('__key'), {c: su.get(c) for c in right_cols})
+
+	return _signups, right, right_lookup, full_lookup, right_cols
+
+
+def _try_fill_matches(joined, full_lookup, right_lookup, _signups, right_cols,
+					  rang_name_cols, signup_first_col, signup_last_col,
+					  fuzzy_interactive=False, fuzzy_cutoff=0.85):
+	"""Attempt swapped, full-name, and fuzzy suggestions to fill missing right-side cols.
+
+	Modifies `joined` in place.
+	"""
+	if not right_cols:
+		return
+
+	candidates = list(full_lookup.keys()) if full_lookup else []
+
+	for idx, prow in joined.iterrows():
+		missing_cols = [c for c in right_cols if pd.isna(prow.get(c))]
+		if not missing_cols:
+			continue
+
+		f = prow.get(rang_name_cols[0])
+		l = prow.get(rang_name_cols[1])
+
+		# swapped key: lastname|firstname
+		swapped_key = _norm(l) + '|' + _norm(f)
+		if swapped_key in right_lookup:
+			vals = right_lookup[swapped_key]
+			for c in right_cols:
+				joined.at[idx, c] = vals.get(c)
+			joined.at[idx, '__key'] = swapped_key
+			continue
+
+		# full-name exact
+		left_full = _norm(f) + ' ' + _norm(l)
+		if left_full in full_lookup:
+			sign_key, vals = full_lookup[left_full]
+			for c in right_cols:
+				joined.at[idx, c] = vals.get(c)
+			if sign_key:
+				joined.at[idx, '__key'] = sign_key
+			continue
+
+		# fuzzy suggestion (hint-only or interactive)
+		if candidates:
+			matches = difflib.get_close_matches(left_full, candidates, n=1, cutoff=fuzzy_cutoff)
+			if matches:
+				matched = matches[0]
+				sign_key, vals = full_lookup.get(matched)
+				# try to fetch original capitalization for display
+				orig_first = None
+				orig_last = None
+				row_match = _signups[_signups['__key'] == sign_key]
+				if not row_match.empty:
+					orig_first = row_match.iloc[0].get(signup_first_col)
+					orig_last = row_match.iloc[0].get(signup_last_col)
+				display_name = f"{orig_first} {orig_last}" if (orig_first or orig_last) else matched
+				print(f"Suggestion: close signup name for '{prow.get(rang_name_cols[0])} {prow.get(rang_name_cols[1])}' -> '{display_name}'")
+				accepted = False
+				if fuzzy_interactive:
+					try:
+						resp = input("Accept suggestion and use these signup values? [y/N]: ").strip().lower()
+					except (EOFError, KeyboardInterrupt):
+						resp = ''
+					if resp in ('y', 'yes'):
+						accepted = True
+				if accepted:
+					for c in right_cols:
+						joined.at[idx, c] = vals.get(c)
+					if sign_key:
+						joined.at[idx, '__key'] = sign_key
+
+
+def _ensure_columns(joined, columns_to_add):
+	for col in columns_to_add:
+		if col not in joined.columns:
+			joined[col] = None
+
+
+def _format_birthdate(joined):
+	if 'Birthdate' in joined.columns:
+		_bd = pd.to_datetime(joined['Birthdate'], errors='coerce')
+		joined['Birthdate'] = _bd.dt.strftime('%d.%m.%Y')
+		joined['Birthdate'] = joined['Birthdate'].where(joined['Birthdate'].notna(), None)
+
+
+def _append_unmatched(joined, _signups, rang_name_cols, signup_first_col, signup_last_col, columns_to_add):
+	_signup_keys = set(_signups['__key'].dropna())
+	_matched_keys = set(joined['__key'].dropna())
+	_unmatched_keys = _signup_keys - _matched_keys
+	if not _unmatched_keys:
+		return joined.drop(columns='__key')
+
+	_unmatched = _signups[_signups['__key'].isin(_unmatched_keys)].copy()
+	out_cols = [c for c in joined.columns if c != '__key']
+	rows = []
+	for _, u in _unmatched.iterrows():
+		row = {}
+		for c in out_cols:
+			if c == rang_name_cols[0]:
+				row[c] = u.get(signup_first_col)
+			elif c == rang_name_cols[1]:
+				row[c] = u.get(signup_last_col)
+			elif c == 'sum':
+				row[c] = 0
+			elif c in columns_to_add:
+				row[c] = u.get(c) if c in u.index else None
+			else:
+				row[c] = None
+		rows.append(row)
+	df_unmatched = pd.DataFrame(rows, columns=out_cols)
+	if 'Birthdate' in df_unmatched.columns:
+		_bd2 = pd.to_datetime(df_unmatched['Birthdate'], errors='coerce')
+		df_unmatched['Birthdate'] = _bd2.dt.strftime('%d.%m.%Y')
+		df_unmatched['Birthdate'] = df_unmatched['Birthdate'].where(df_unmatched['Birthdate'].notna(), None)
+	df_unmatched = df_unmatched.sort_values(by=rang_name_cols[1], key=lambda s: s.str.lower()).reset_index(drop=True)
+	return pd.concat([joined.drop(columns='__key'), df_unmatched], ignore_index=True)
+
+
+
 def combine_rangliste_with_signups(rang_df, signups_df,
-					rang_name_cols=('Vorname', 'Nachname'),
-					signup_first_col='Firstname', signup_last_col='Lastname',
-					columns_to_add=['Sex', 'XC', 'Birthdate'],
-					fuzzy_interactive=False, fuzzy_cutoff=0.85):
+								   rang_name_cols=('Vorname', 'Nachname'),
+								   signup_first_col='Firstname', signup_last_col='Lastname',
+								   columns_to_add=['Sex', 'XC', 'Birthdate'],
+								   fuzzy_interactive=False, fuzzy_cutoff=0.85):
 	"""Combine rangliste and signups preserving rangliste order.
 
 	For each row in `rang_df` (expected to have columns named by
@@ -99,163 +254,34 @@ def combine_rangliste_with_signups(rang_df, signups_df,
 	if signup_first_col not in signups_df.columns or signup_last_col not in signups_df.columns:
 		raise ValueError(f"signups_df must contain columns: {signup_first_col}, {signup_last_col}")
 
-	# create normalized key columns
-	def _norm(s):
-		return (str(s) if pd.notna(s) else '').strip().lower()
-
-	_signups = signups_df.copy()
-	_signups['__key'] = _signups[signup_first_col].apply(_norm) + '|' + _signups[signup_last_col].apply(_norm)
-
-	# detect duplicates in signups (same normalized name)
-	dup_keys = _signups['__key'][_signups['__key'].duplicated(keep=False)].unique()
-	if len(dup_keys) > 0:
-		import warnings
-		warnings.warn(f"Multiple signup rows for the same name found for {len(dup_keys)} name(s); first entry will be used.")
-
-	# build a right-side lookup: keep first occurrence per key
-	right_cols = []
-	for col in columns_to_add:
-		if col in _signups.columns:
-			right_cols.append(col)
-
-	if right_cols:
-		right = _signups.set_index('__key')[right_cols].groupby(level=0).first()
-	else:
-		# no columns to bring over; create empty frame
-		right = pd.DataFrame(columns=columns_to_add)
+	# build lookups and helper structures
+	_signups, right, right_lookup, full_lookup, right_cols = _build_lookups(
+		signups_df, signup_first_col, signup_last_col, columns_to_add
+	)
 
 	# prepare left frame and join on key to preserve order
 	left = rang_df.copy()
 	left['__key'] = left[rang_name_cols[0]].apply(_norm) + '|' + left[rang_name_cols[1]].apply(_norm)
-
 	joined = left.join(right, on='__key')
 
-	# If some rows didn't match directly, try swapped-name matches
-	# (Vorname == Lastname and Nachname == Firstname in signups),
-	# and as a further fallback try full-name equality (Firstname + ' ' + Lastname)
-	if right_cols:
-		# build fast lookups from signups
-		right_lookup = right.to_dict(orient='index')
-		full_lookup = {}
-		for _, su in _signups.iterrows():
-			f_s = _norm(su.get(signup_first_col))
-			l_s = _norm(su.get(signup_last_col))
-			full_key = f_s + ' ' + l_s
-			# record first occurrence for this full_key
-			if full_key not in full_lookup:
-				full_lookup[full_key] = (su.get('__key'), {c: su.get(c) for c in right_cols})
+	# attempt to fill missing right-side values using swapped/full/fuzzy strategies
+	_try_fill_matches(joined, full_lookup, right_lookup, _signups, right_cols,
+					  rang_name_cols, signup_first_col, signup_last_col,
+					  fuzzy_interactive=fuzzy_interactive, fuzzy_cutoff=fuzzy_cutoff)
 
-		for idx, prow in joined.iterrows():
-			# determine if any of the right-side columns are missing here
-			missing_cols = [c for c in right_cols if pd.isna(prow.get(c))]
-			if not missing_cols:
-				continue
-			# build swapped key from rangliste values (lastname|firstname)
-			f = prow.get(rang_name_cols[0])
-			l = prow.get(rang_name_cols[1])
-			swapped_key = _norm(l) + '|' + _norm(f)
-			if swapped_key in right_lookup:
-				vals = right_lookup[swapped_key]
-				for c in right_cols:
-					joined.at[idx, c] = vals.get(c)
-				joined.at[idx, '__key'] = swapped_key
-				continue
-			# try full-name equality (firstname + ' ' + lastname)
-			left_full = _norm(f) + ' ' + _norm(l)
-			if left_full in full_lookup:
-				sign_key, vals = full_lookup[left_full]
-				for c in right_cols:
-					joined.at[idx, c] = vals.get(c)
-				# mark row as matched against the signup's original key
-				if sign_key:
-					joined.at[idx, '__key'] = sign_key
-				continue
-			# As a final hint-only step, try fuzzy matching on the full name
-			# but DO NOT combine — only print a suggested close name.
-			# build a candidate list of normalized full names from signups
-			if full_lookup:
-				candidates = list(full_lookup.keys())
-				matches = difflib.get_close_matches(left_full, candidates, n=1, cutoff=fuzzy_cutoff)
-				if matches:
-					matched = matches[0]
-					# original display: find the signup row corresponding to this full key
-					sign_key, vals = full_lookup.get(matched)
-					# print a helpful suggestion (use original capitalization if possible)
-					orig_first = None
-					orig_last = None
-					# try to retrieve original values from _signups DataFrame
-					row_match = _signups[_signups['__key'] == sign_key]
-					if not row_match.empty:
-						orig_first = row_match.iloc[0].get(signup_first_col)
-						orig_last = row_match.iloc[0].get(signup_last_col)
-					display_name = f"{orig_first} {orig_last}" if (orig_first or orig_last) else matched
-					print(f"Suggestion: close signup name for '{prow.get(rang_name_cols[0])} {prow.get(rang_name_cols[1])}' -> '{display_name}'")
-					# interactive accept/decline (only if requested and stdin is a TTY)
-					accepted = False
-					if fuzzy_interactive and sys.stdin.isatty():
-						resp = input("Accept suggestion and use these signup values? [y/N]: ").strip().lower()
-						if resp == 'y':
-							accepted = True
-					if accepted:
-						for c in right_cols:
-							joined.at[idx, c] = vals.get(c)
-						# mark row as matched against the signup's original key so it won't be appended
-						if sign_key:
-							joined.at[idx, '__key'] = sign_key
-
-	# ensure expected output columns exist (fill NaN if missing)
-	for col in columns_to_add:
-		if col not in joined.columns:
-			joined[col] = None
+	# ensure requested columns exist on the joined frame
+	_ensure_columns(joined, columns_to_add)
 
 	# normalize Birthdate format to DD.MM.YYYY if present
-	if 'Birthdate' in joined.columns:
-		_bd = pd.to_datetime(joined['Birthdate'], errors='coerce')
-		joined['Birthdate'] = _bd.dt.strftime('%d.%m.%Y')
-		# convert NaT/NaN to None for cleaner Excel output
-		joined['Birthdate'] = joined['Birthdate'].where(joined['Birthdate'].notna(), None)
+	_format_birthdate(joined)
 
-	# Append signup rows that were not matched in rangliste, sorted by Lastname
-	_signup_keys = set(_signups['__key'].dropna())
-	_matched_keys = set(joined['__key'].dropna())
-	_unmatched_keys = _signup_keys - _matched_keys
-	if _unmatched_keys:
-		_unmatched = _signups[_signups['__key'].isin(_unmatched_keys)].copy()
-		# Build rows with the same output columns as 'joined' (except helper key)
-		out_cols = [c for c in joined.columns if c != '__key']
-		rows = []
-		for _, u in _unmatched.iterrows():
-			row = {}
-			for c in out_cols:
-				if c == rang_name_cols[0]:
-					row[c] = u.get(signup_first_col)
-				elif c == rang_name_cols[1]:
-					row[c] = u.get(signup_last_col)
-				elif c == 'sum':
-					# unmatched signups get sum=0
-					row[c] = 0
-				elif c in columns_to_add:
-					row[c] = u.get(c) if c in u.index else None
-				else:
-					row[c] = None
-			rows.append(row)
-		df_unmatched = pd.DataFrame(rows, columns=out_cols)
-		# normalize Birthdate in unmatched the same way
-		if 'Birthdate' in df_unmatched.columns:
-			_bd2 = pd.to_datetime(df_unmatched['Birthdate'], errors='coerce')
-			df_unmatched['Birthdate'] = _bd2.dt.strftime('%d.%m.%Y')
-			df_unmatched['Birthdate'] = df_unmatched['Birthdate'].where(df_unmatched['Birthdate'].notna(), None)
-		# sort unmatched by Lastname (case-insensitive)
-		df_unmatched = df_unmatched.sort_values(by=rang_name_cols[1], key=lambda s: s.str.lower()).reset_index(drop=True)
-		# combine preserving rangliste order first, then unmatched
-		joined = pd.concat([joined.drop(columns='__key'), df_unmatched], ignore_index=True)
-	else:
-		joined = joined.drop(columns='__key')
+	# Append signup rows that were not matched in rangliste (helper handles drop of __key)
+	joined = _append_unmatched(joined, _signups, rang_name_cols, signup_first_col, signup_last_col, columns_to_add)
 
 	return joined
 
 
-def run_selction(args):
+def run_selection(args):
 	df_signups, df_rangliste = load_both(
 		base_dir=args.base_dir,
 		signup_file=args.signup_file,
@@ -290,7 +316,7 @@ def main(argv=None):
 	args = parser.parse_args(argv)
 
 	try:
-		run_selction(args)
+		run_selection(args)
 	except FileNotFoundError as e:
 		print(f"Error: {e}", file=sys.stderr)
 		return 2
