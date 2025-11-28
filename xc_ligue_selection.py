@@ -171,11 +171,17 @@ def _try_fill_matches(joined, full_lookup, right_lookup, _signups, right_cols,
 				accepted = False
 				if fuzzy_interactive:
 					try:
-						resp = input("Accept suggestion and use these signup values? [y/N]: ").strip().lower()
+						resp = input("Accept suggestion and use these signup values? [y/n]: ").strip()
 					except (EOFError, KeyboardInterrupt):
 						resp = ''
-					if resp in ('y', 'yes'):
+					# accept on yes/y (case-insensitive), decline on no/n; anything else -> decline
+					resp_norm = resp.lower()
+					if resp_norm in ('y', 'yes'):
 						accepted = True
+					elif resp_norm in ('n', 'no'):
+						accepted = False
+					else:
+						accepted = False
 				if accepted:
 					for c in right_cols:
 						joined.at[idx, c] = vals.get(c)
@@ -298,7 +304,7 @@ def run_selection(args):
 		signup_first_col='Firstname',
 		signup_last_col='Lastname',
 		columns_to_add=['Sex', 'XC', 'Birthdate'],
-		fuzzy_interactive=getattr(args, 'interactive', False),
+		fuzzy_interactive=getattr(args, 'interactive', True),
 	)
 
 	# save combined to a new Excel file
