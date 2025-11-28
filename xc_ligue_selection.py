@@ -310,12 +310,26 @@ def run_selection(args):
 	)
 
 	# assign Selektion column based on XC values and ordered rules
-	combined = _assign_selection(combined, xc_col='XC', selection_col='Selektion')
+	selection = _assign_selection(combined, xc_col='XC', selection_col='Selektion')
 
 	# save combined to a new Excel file
 	output_path = Path(args.base_dir) / 'combined_selection.xlsx'
-	_save_with_coloring(output_path, combined, sex_col='Sex')
+	_save_with_coloring(output_path, selection, sex_col='Sex')
 	print(f"Combined selection saved to: {output_path.resolve()}")
+	
+	# drop rows that do not have a Selektion assigned (None/NaN/empty)
+	if 'Selektion' in selection.columns:
+		_before = len(selection)
+		selection = selection[selection['Selektion'].notna() & (selection['Selektion'].astype(str).str.strip() != '')].reset_index(drop=True)
+		_after = len(selection)
+		print(f"Dropped {_before - _after} rows without Selektion; {_after} remain.")
+		
+		output_path = Path(args.base_dir) / 'selection.xlsx'
+		_save_with_coloring(output_path, selection, sex_col='Sex')
+		print(f"Selection saved to: {output_path.resolve()}")
+	
+	else:
+		print("Warning: 'Selektion' column missing; no rows dropped.")
 
 
 def _save_with_coloring(path, df, sex_col='Sex', birthdate_col='Birthdate'):
