@@ -323,11 +323,20 @@ def run_selection(args):
 		selection = selection[selection['Selektion'].notna() & (selection['Selektion'].astype(str).str.strip() != '')].reset_index(drop=True)
 		_after = len(selection)
 		print(f"Dropped {_before - _after} rows without Selektion; {_after} remain.")
-		
+		# sort by Selektion in the requested custom order
+
 		output_path = Path(args.base_dir) / 'selection.xlsx'
 		_save_with_coloring(output_path, selection, sex_col='Sex')
 		print(f"Selection saved to: {output_path.resolve()}")
-	
+		
+		_order = ['A', 'B', 'C', 'Guest', 'Passive']
+		selection['Selektion'] = pd.Categorical(selection['Selektion'], categories=_order, ordered=True)
+		selection = selection.sort_values(by=['Selektion']).reset_index(drop=True)
+		
+		output_path = Path(args.base_dir) / 'sorted_selection.xlsx'
+		_save_with_coloring(output_path, selection, sex_col='Sex')
+		print(f"Sorted selection saved to: {output_path.resolve()}")
+
 	else:
 		print("Warning: 'Selektion' column missing; no rows dropped.")
 
