@@ -9,7 +9,7 @@ from helpers.data_handling import (
     normalize_glider_name,
     normalize_gender,
     normalize_nationality,
-    find_duplicate_athletes
+    check_duplicate_athletes
 )
 from helpers.pdf import generate_pandas_data_frames, generate_single_pdf
 
@@ -69,11 +69,12 @@ def process_excel_files(json_keys: list, excel_files: list, results_path: str, j
 
 def data_cleaning(json_data: dict):
     for athlete in json_data.keys():
+        athlete_info = f"{json_data[athlete]}: {json_data[athlete]['name']} {json_data[athlete]['first_name']}"
         json_data[athlete]["glider"] = normalize_glider_name(json_data[athlete]["glider"])
         json_data[athlete]["gender"] = normalize_gender(json_data[athlete]["gender"])
-        json_data[athlete]["nat"] = normalize_nationality(json_data[athlete]["nat"])
+        json_data[athlete]["nat"] = normalize_nationality(json_data[athlete]["nat"], athlete_info)
 
-    find_duplicate_athletes(json_data)
+    check_duplicate_athletes(json_data)
 
 
 def generate_pdfs(competition_json: dict, json_data: dict, comp_key: str):

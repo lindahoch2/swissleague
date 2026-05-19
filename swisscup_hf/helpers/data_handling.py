@@ -1,27 +1,59 @@
 import pandas as pd
 from collections import defaultdict
 
-def print_name_discrepancy(json_data, row, key):
-      print(f"\nDiscrepancy found for civl_id {row['civl_id']}:")
-      print(f"{key} in JSON: {json_data[str(row['civl_id'])][key]}, {key} in Excel: {row[key]}")
+
+def _check_civl_id_name_discrepancy(json_data, row):
+    civl_id = str(row['civl_id'])
+
+    for key in ['name', 'first_name']:
+        json_val = json_data[civl_id][key]
+        excel_val = row[key]
+
+        if json_val != excel_val:
+            print(f"\n⚠️ Discrepancy found for civl_id {civl_id} ({json_data[civl_id]['first_name']} {json_data[civl_id]['name']}) in {key.replace('_', ' ').title()}:")
+            print(f"  [1] JSON value:  {json_val}")
+            print(f"  [2] Excel value: {excel_val}")
+
+            while True:
+                choice = input(f"Which value should be kept? (1/2): ").strip()
+                if choice == '1':
+                    # Do nothing, keep existing JSON data
+                    break
+                elif choice == '2':
+                    # Update JSON with Excel data
+                    json_data[civl_id][key] = excel_val
+                    break
+                else:
+                    print("Invalid input. Please enter 1 or 2.")
 
 
-def check_civl_id_name_discrepancy(json_data, row):
-      if json_data[str(row['civl_id'])]['name'] != row['name']:
-        print_name_discrepancy(json_data, row, 'name')
-      if json_data[str(row['civl_id'])]['first_name'] != row['first_name']:
-        print_name_discrepancy(json_data, row, 'first_name')
+def _glider_user_interaction(name, old_glider, new_glider):
+    print(f"\n🪂 Discrepancy in glider found for {name}:")
+    print(f"  [1] Old glider (JSON):  {old_glider}")
+    print(f"  [2] New glider (Excel): {new_glider}")
+    print(f"  [3] Type a custom glider name")
+
+    while True:
+        choice = input("Which glider should be used? (1/2/3): ").strip()
+        if choice == '1': return old_glider
+        if choice == '2': return new_glider
+        if choice == '3': return input("Enter custom glider name: ").strip()
+        print("Invalid input.")
 
 
-def check_wing(json_data, row):
-      if json_data[str(row['civl_id'])]['glider'] != row['glider']:
-        if json_data[str(row['civl_id'])]['glider'] == "":
-          print(f"\nUpdating empty glider for {row['civl_id']}")
-          json_data[str(row['civl_id'])]['glider'] = row['glider']
+def _check_and_update_glider(json_data, row):
+    civl_id = str(row['civl_id'])
+    old_glider = json_data[civl_id]['glider']
+    new_glider = row['glider']
+
+    if old_glider != new_glider:
+        if old_glider == "":
+            json_data[civl_id]['glider'] = new_glider
         else:
-          print(f"\nDiscrepancy in glider found for civl_id {row['civl_id']}:")
-          print("old glider: ", json_data[str(row['civl_id'])]['glider'])
-          print("new glider: ", row['glider'])
+            name = f"{json_data[civl_id]['first_name']} {json_data[civl_id]['name']}"
+            # Call the UI function, then update the data
+            resolved_glider = _glider_user_interaction(name, old_glider, new_glider)
+            json_data[civl_id]['glider'] = resolved_glider
 
 
 def add_points_to_data(df: pd.DataFrame, num_participants):
@@ -205,64 +237,117 @@ def normalize_glider_name(glider):
     return glider
 
 
-def find_duplicate_athletes(json_data):
-    name_map = defaultdict(list)
+def _find_duplicate_athletes(json_data):
+    name_map = defaultdict(set)
 
+    # 1. Build the map using a sorted key to handle swapped names automatically
     for civl_id, data in json_data.items():
         name = data.get('name', '').strip().lower()
         first_name = data.get('first_name', '').strip().lower()
 
-        # Build both "name-first_name" and "first_name-name" as possible keys
-        key1 = (name, first_name)
-        key2 = (first_name, name)
+        sorted_key = tuple(sorted([name, first_name]))
+        name_map[sorted_key].add(civl_id)
 
-        name_map[key1].append(civl_id)
-        if key1 != key2:
-            name_map[key2].append(civl_id)
+    return name_map
 
-    # Filter and print duplicates
-    printed = set()
+
+def _duplicate_athletes_user_interaction(key, unique_ids):
+    print(f"\n👯 Possible duplicate: {key[0].title()} {key[1].title()}")
+    print(f"CIVL IDs found: {', '.join(unique_ids)}")
+
+    action = input("Do you want to merge these records? (y/n): ").strip().lower()
+    if action == 'y':
+        print("Available IDs:", unique_ids)
+        target_id = input("Type the exact CIVL ID to KEEP (or press Enter to cancel): ").strip()
+        return True, target_id
+
+    else:
+        return False, None
+
+
+def _merge_duplicate_athletes(unique_ids, target_id, json_data):
+    source_ids = [cid for cid in unique_ids if cid != target_id]
+
+    for source_id in source_ids:
+        # Safety check: ensure source_id wasn't already deleted
+        if source_id not in json_data:
+            continue
+
+        # Transfer competitions
+        for comp_key, comp_data in json_data[source_id]["competitions"].items():
+            if comp_key in json_data[target_id]["competitions"]:
+                if comp_data["points"] > json_data[target_id]["competitions"][comp_key]["points"]:
+                    json_data[target_id]["competitions"][comp_key] = comp_data
+            else:
+                json_data[target_id]["competitions"][comp_key] = comp_data
+
+        # Delete the duplicate
+        del json_data[source_id]
+
+    # Recalculate total points for the survivor
+    target_comps = json_data[target_id]["competitions"]
+    for k in target_comps:
+        target_comps[k]["counts"] = False
+
+    top_comps = sorted(target_comps.items(), key=lambda x: x[1]["points"], reverse=True)[:4]
+
+    total_points = 0
+    for comp_key, comp_data in top_comps:
+        target_comps[comp_key]["counts"] = True
+        total_points += comp_data["points"]
+
+    json_data[target_id]["total_points"] = round(total_points, 2)
+    print(f"✅ Successfully merged into {target_id}.")
+
+
+def check_duplicate_athletes(json_data):
+    name_map = _find_duplicate_athletes(json_data)
+
+    # 2. Iterate through the map
     for key, ids in name_map.items():
-        unique_ids = set(ids)
-        if len(unique_ids) > 1 and key not in printed:
-            printed.add(key)
-            print(f"Possible duplicate: {key[0].title()} {key[1].title()} found with CIVL IDs: {', '.join(sorted(unique_ids))}")
+        # Filter IDs to ensure they actually still exist in json_data
+        # (This protects against cases where an ID was deleted in a previous merge)
+        unique_ids = [cid for cid in ids if cid in json_data]
+
+        if len(unique_ids) > 1:
+                is_merge, target_id = _duplicate_athletes_user_interaction(key, unique_ids)
+
+                if is_merge and target_id in unique_ids:
+                    _merge_duplicate_athletes(unique_ids, target_id, json_data)
+                else:
+                    print("Cancelled merge. Skipping...")
 
 
 def normalize_gender(gender):
     gender = gender.strip().upper()
 
-    if len(gender) > 1:
-        print(f"Invalid Gender length. Gender: {gender}")
-
     if gender == "W":   # normalize "W" to "F"
         gender = "F"
+
+    while len(gender) > 1 or gender not in ["M", "F"]:
+        print(f"\n⚠️ Invalid Gender found: '{gender}'")
+        gender = input("Please enter a valid gender ('M' or 'F'): ").strip().upper()
 
     return gender
 
 
-def normalize_nationality(nationality):
+def normalize_nationality(nationality, info):
     nationality = nationality.strip().upper()
 
     replacements = {
-        "CH": "SUI",
-        "IT": "ITA",
-        "UK": "GBR",
-        "FR": "FRA",
-        "F": "FRA",
-        "NZ": "NZL",
-        "D": "DEU",
-        "AT": "AUT",
-        "DK": "DNK",
-        "UY": "URY",
-        "DE": "DEU",
+        "CH": "SUI", "IT": "ITA", "UK": "GBR", "FR": "FRA",
+        "F": "FRA", "NZ": "NZL", "D": "DEU", "AT": "AUT",
+        "DK": "DNK", "UY": "URY", "DE": "DEU",
     }
 
     if nationality in replacements:
         nationality = replacements[nationality]
 
-    if len(nationality) != 3:
-        print(f"Invalid Nationality length. Nationality: {nationality}")
+    while len(nationality) != 3:
+        print(f"\n⚠️ Invalid Nationality length: '{nationality}' for {info}")
+        nationality = input("Please enter a valid 3-letter IOC country code (e.g., SUI): ").strip().upper()
+        if nationality in replacements:
+            nationality = replacements[nationality]
 
     return nationality
 
