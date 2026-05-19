@@ -62,7 +62,7 @@ def data_cleaning(json_data: dict):
     find_duplicate_athletes(json_data)
 
 
-def generate_pdfs(competition_json: dict, json_data: dict):
+def generate_pdfs(competition_json: dict, json_data: dict, comp_key: str):
     all_competitions = competition_json.keys()
 
     df_female, df_male, df_overall = generate_pandas_data_frames(json_data, all_competitions)
@@ -79,9 +79,9 @@ def generate_pdfs(competition_json: dict, json_data: dict):
     df_overall.sort_values("total_points", ascending=False, inplace=True)
 
     # generate the PDFs
-    generate_single_pdf(json_data, competition_json, df_female, WOMEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_female.pdf")
-    generate_single_pdf(json_data, competition_json, df_male, MEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_male.pdf")
-    generate_single_pdf(json_data, competition_json, df_overall, OVERALL_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_overall.pdf")
+    generate_single_pdf(json_data, competition_json, df_female, WOMEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_female.pdf")
+    generate_single_pdf(json_data, competition_json, df_male, MEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_male.pdf")
+    generate_single_pdf(json_data, competition_json, df_overall, OVERALL_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_overall.pdf")
 
 def main():
     # Set up argument parser
@@ -132,11 +132,20 @@ def main():
     # Clean the data
     data_cleaning(data_json)
 
+    last_key = ""
+    if keys_to_process:
+        last_key = keys_to_process[-1]
+
     # Generate PDF report
-    generate_pdfs(competition_json, data_json)
+    generate_pdfs(competition_json, data_json, last_key)
 
     # Save the updated JSON data
     save_json(data_json, JSON_PATH)
+
+    # Save the additional Intermediate Results
+    additional_json_path = INTERMEDIATE_DIR / f"swissleague_data_2026_{last_key}.json"
+    save_json(data_json, additional_json_path)
+    print(f"Additional JSON saved to: {additional_json_path}")
 
 if __name__ == "__main__":
     main()
