@@ -24,8 +24,22 @@ def process_excel_files(json_keys: list, excel_files: list, results_path: str, j
         df = df[['Rank', 'First Name', 'Last Name', 'Gender', 'CIVL ID', 'Nat', 'Glider']]
         df.columns = ['rank', 'first_name', 'name', 'gender', 'civl_id', 'nat', 'glider']
 
-        # Evaluting the Points received based on ranking
-        num_participants = competition_json[competition_key]["num_participants"]
+        # Evaluating the Points received based on ranking
+        # Fallback to len(df) if the competition key or "num_participants" is missing
+        num_participants = competition_json.get(competition_key, {}).get("num_participants")
+
+        if not num_participants or num_participants == 0:
+            num_participants = len(df)
+            print(f"Warning: 'num_participants' not found for {competition_key}. Falling back to Excel row count: {num_participants}")
+
+            if competition_key not in competition_json:
+                competition_json[competition_key] = {
+                    "title": competition_key.capitalize(),
+                    "num_participants": num_participants,
+                    "physical": False
+                }
+            competition_json[competition_key]["num_participants"] = num_participants
+
         num_part, df = add_points_to_data(df, num_participants)
 
         # removing possible blanc spaces around civil id
