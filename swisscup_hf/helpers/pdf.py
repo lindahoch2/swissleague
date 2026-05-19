@@ -9,7 +9,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.colors import grey
 from helpers.config import LOGO_PATH, INFO_TEXT
 
-def add_data_to_lists(overall_rows: list, gender_rows: list, athlete_data: dict, competitions: list, civil_id):
+def _add_data_to_lists(overall_rows: list, gender_rows: list, athlete_data: dict, competitions: list, civil_id):
     row = {
         "name": f"{athlete_data['first_name']} {athlete_data['name']}",
         }
@@ -36,9 +36,9 @@ def generate_pandas_data_frames(json_data: dict, all_competitions: list):
     rows_overall = []
     for civl_id in json_data.keys():
         if json_data[civl_id]['gender'] == 'F':
-            rows_overall, rows_female = add_data_to_lists(rows_overall, rows_female, json_data[civl_id], all_competitions, civl_id)
+            rows_overall, rows_female = _add_data_to_lists(rows_overall, rows_female, json_data[civl_id], all_competitions, civl_id)
         else:
-            rows_overall, rows_male = add_data_to_lists(rows_overall, rows_male, json_data[civl_id], all_competitions, civl_id)
+            rows_overall, rows_male = _add_data_to_lists(rows_overall, rows_male, json_data[civl_id], all_competitions, civl_id)
 
     df_female = pd.DataFrame(rows_female)
     df_male = pd.DataFrame(rows_male)
@@ -47,7 +47,7 @@ def generate_pandas_data_frames(json_data: dict, all_competitions: list):
     return df_female, df_male, df_overall
 
 
-def extract_competition_name_list(competition_json: dict):
+def _extract_competition_name_list(competition_json: dict):
     names = []
     for comp in competition_json.keys():
         names.append(competition_json[comp]["title"])
@@ -131,7 +131,7 @@ def generate_single_pdf(json_data: dict, competition_json: dict, df: pd.DataFram
     story.append(Paragraph(INFO_TEXT, info_style))
 
     # Prepare table header
-    competitions = extract_competition_name_list(competition_json)
+    competitions = _extract_competition_name_list(competition_json)
     raw_header = ["Rank", "Civil ID", "Name", "Gender", "Nationality", "Glider"] + competitions + ["Total Points"]
     header = []
 
