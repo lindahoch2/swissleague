@@ -1,5 +1,4 @@
-# main.py
-import json
+import argparse
 import pandas as pd
 from helpers.config import *
 from helpers.utils import load_json, save_json
@@ -85,8 +84,42 @@ def generate_pdfs(competition_json: dict, json_data: dict):
     generate_single_pdf(json_data, competition_json, df_overall, OVERALL_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_overall.pdf")
 
 def main():
-    print(BASE_DIR)
-    print(DATA_DIR)
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Process Swissleague Hike and Fly results.")
+    parser.add_argument(
+        '-c', '--comps',
+        nargs='+',
+        help="List of competition keys to evaluate (e.g., -c jhf eiger airtour). If omitted, runs all."
+    )
+    args = parser.parse_args()
+
+    print(f"Base Directory: {BASE_DIR}")
+    print(f"Data Directory: {DATA_DIR}")
+
+    # Determine which competitions to run
+    selected_keys = args.comps if args.comps else JSON_KEYS
+
+    keys_to_process = []
+    files_to_process = []
+
+    # Map the selected keys to their corresponding excel files
+    for key, file in zip(JSON_KEYS, EXCEL_FILES):
+        if key in selected_keys:
+            keys_to_process.append(key)
+            files_to_process.append(file)
+
+    # Validate inputs to catch any typos in the command line
+    invalid_keys = set(selected_keys) - set(JSON_KEYS)
+    if invalid_keys:
+        print(f"\nWarning: The following keys are invalid and will be ignored: {', '.join(invalid_keys)}")
+        print(f"Valid keys are: {', '.join(JSON_KEYS)}\n")
+
+    if not keys_to_process:
+        print("No valid competitions selected. Exiting.")
+        return
+
+    print(f"Evaluating competitions: {', '.join(keys_to_process)}")
+
     # Load existing JSON data
     data_json = load_json(JSON_PATH)
 
@@ -94,7 +127,7 @@ def main():
     competition_json = load_json(COMPETITION_PATH)
 
     # Process each Excel file and update JSON data
-    process_excel_files(JSON_KEYS, EXCEL_FILES, RESULTS_DIR, data_json, competition_json)
+    process_excel_files(keys_to_process, files_to_process, RESULTS_DIR, data_json, competition_json)
 
     # Clean the data
     data_cleaning(data_json)

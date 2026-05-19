@@ -24,19 +24,13 @@ FILE_PREFIX = "swisscup_hf_2026"
 
 # Competitions List
 EXCEL_FILES = [
-    "jhf_2026.xlsx"
-]
-JSON_KEYS = [
-    "jhf"
-]
-EEXCEL_FILES = [
     "jhf_2026.xlsx", "airtour_2026.xlsx", "engelberg_2026.xlsx",
     "ghf_2026.xlsx", "eigertour_2026.xlsx", "gruyere_2026.xlsx",
     "lungern_2026.xlsx", "flyback_2026.xlsx", "trailfly_2026.xlsx",
     "Vercofly_2026.xlsx", "beizen_2026.xlsx", "belli_2026.xlsx",
     "millets_2026.xlsx"
 ]
-JJSON_KEYS = [
+JSON_KEYS = [
     "jhf", "airtour", "engelberg", "ghf", "eiger", "gruyere", "lungern",
     "flyback", "trailfly", "vercofly", "beizen", "belli", "millet"
 ]

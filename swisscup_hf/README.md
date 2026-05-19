@@ -1,14 +1,30 @@
 # Swisscup HF
 
-# Running the Script:
-1. Create a virtual Environment
-```python3 -m venv slhf```
+### Running the Evaluation:
 
-2. Activate the Environment
-```source slhf/bin/activate```
+1. **Create a virtual environment:**
+   ```bash
+   python3 -m venv slhf
+   ```
 
-3. Install Requirements
-```pip install -r requirements.txt```
+2. **Activate the environment:**
+   ```bash
+   source slhf/bin/activate
+   ```
 
-4. Run the script
-```python main_swisscup_hf.py``
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Update the paths in the config.py to your local data structure**
+
+5. **Run the full script:**
+   ```bash
+   python main_swisscup_hf.py
+   ```
+
+5. **Run the script for specific competitions:**
+   ```bash
+   python main_swisscup_hf.py -c <comp_json_key1> <comp_json_key2>
+   ```
