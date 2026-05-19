@@ -63,14 +63,14 @@ def add_points_to_data(df: pd.DataFrame, num_participants):
     return num_participants, df
 
 
-def check_if_competition_already_exists(json_data, civil_id, competition_key):
+def _check_if_competition_already_exists(json_data, civil_id, competition_key):
     if competition_key in json_data[civil_id]["competitions"]:
       print(f"Competition {competition_key} already exists for civl_id {civil_id}")
       return True
     return False
 
 
-def add_competition_data(json_data, data_row, competition_key):
+def _add_competition_data(json_data, data_row, competition_key):
     json_data[str(data_row['civl_id'])]["competitions"][competition_key] = {
         "rank": data_row['rank'],
         "points": data_row['points'],
@@ -79,7 +79,7 @@ def add_competition_data(json_data, data_row, competition_key):
     return json_data
 
 
-def update_total_points(json_data, civil_id:str, new_points, new_comp_key):
+def _update_total_points(json_data, civil_id:str, new_points, new_comp_key):
     athletes_comp_keys = json_data[civil_id]["competitions"].keys()
     if len(athletes_comp_keys) <= 4:
         total_points = json_data[civil_id]["total_points"] + new_points
@@ -102,12 +102,7 @@ def update_total_points(json_data, civil_id:str, new_points, new_comp_key):
     return json_data
 
 
-def remove_athletes_data_from_comp_keys(athletes_comp_keys):
-    exclude_keys = {'name', 'first_name', 'gender', 'total_points', 'nat', 'glider'}
-    return [key for key in athletes_comp_keys if key not in exclude_keys]
-
-
-def add_athlete_data(json_data, data_row):
+def _add_athlete_data(json_data, data_row):
     print()
     print(f"Adding athlete data for civl_id {data_row['civl_id']}")
     json_data[str(data_row['civl_id'])] = {
@@ -122,34 +117,35 @@ def add_athlete_data(json_data, data_row):
     return json_data
 
 
+def _resolve_fake_civl_id(json_data, row):
+    """Returns the real CIVL ID if a matching fake one is found, else the original."""
+    if "Z" in str(row['civl_id']):
+        for json_civl_id, athlete in json_data.items():
+            if athlete['name'] == row['name'] and athlete['first_name'] == row['first_name']:
+                return json_civl_id
+    return row['civl_id']
+
+
+def _process_single_athlete_record(json_data, row, competition_key):
+    """Handles the full flow for a single athlete row."""
+    row['civl_id'] = _resolve_fake_civl_id(json_data, row)
+    civl_id = str(row['civl_id'])
+
+    if civl_id in json_data:
+        _check_civl_id_name_discrepancy(json_data, row)
+        _check_and_update_glider(json_data, row)
+    else:
+        _add_athlete_data(json_data, row)
+
+    if not _check_if_competition_already_exists(json_data, civl_id, competition_key):
+        _add_competition_data(json_data, row, competition_key)
+        _update_total_points(json_data, civl_id, row['points'], competition_key)
+
+
 def add_data_to_json(json_data: dict, df: pd.DataFrame, competition_key: str):
-    # add data to json
+    """Main entry point. Now incredibly clean and readable."""
     for _, row in df.iterrows():
-        # If fake civl_id, check if pilot already exists in database
-        if "Z" in str(row['civl_id']):
-            # Search in JSON for same last name
-            for json_civl_id, athlete in json_data.items():
-                if athlete['name'] == row['name']:
-                    # Check if first name matches
-                    if athlete['first_name'] == row['first_name']:
-                        # Replace manual civl_id with real one
-                        row['civl_id'] = json_civl_id
-                        break
-
-        # check data if civl_id already exists
-        if str(row['civl_id']) in json_data:
-            # check if there is name discrepancy for manual update
-            check_civl_id_name_discrepancy(json_data, row)
-            check_wing(json_data, row)
-
-        else:
-            # add athletes data
-            json_data = add_athlete_data(json_data, row)
-
-        # add the competition
-        if not check_if_competition_already_exists(json_data, str(row['civl_id']), competition_key):
-          json_data = add_competition_data(json_data, row, competition_key)
-          json_data = update_total_points(json_data, str(row['civl_id']), row['points'], competition_key)
+        _process_single_athlete_record(json_data, row, competition_key)
 
     return json_data
 
