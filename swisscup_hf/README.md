@@ -28,3 +28,10 @@
    ```bash
    python main_swisscup_hf.py -c <comp_json_key1> <comp_json_key2>
    ```
+
+### Utilities:
+
+For clearing the competitions JSON but keeping the athlete info, you can run:
+```bash
+python main_clean_data.py
+```
