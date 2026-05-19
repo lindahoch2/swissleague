@@ -1,0 +1,109 @@
+# main.py
+import json
+import pandas as pd
+from helpers.config import *
+from helpers.utils import load_json, save_json
+from helpers.data_handling import (
+    add_data_to_json,
+    add_points_to_data,
+    get_highest_fake_civil_id_already_in_use,
+    normalize_glider_name,
+    normalize_gender,
+    normalize_nationality,
+    find_duplicate_athletes
+)
+from helpers.pdf import generate_pandas_data_frames, generate_single_pdf
+
+def process_excel_files(json_keys: list, excel_files: list, results_path: str, json_data: dict, competition_json: dict):
+    for competition_key, excel_file in zip(json_keys, excel_files):
+        # Load the Excel file
+        excel_path = f"{results_path}/{excel_file}"
+        print(f"Processing {excel_path}...")
+        df = pd.read_excel(excel_path)
+
+        # Select only the necessary columns and rename for consistency
+        df = df[['Rank', 'First Name', 'Last Name', 'Gender', 'CIVL ID', 'Nat', 'Glider']]
+        df.columns = ['rank', 'first_name', 'name', 'gender', 'civl_id', 'nat', 'glider']
+
+        # Evaluting the Points received based on ranking
+        num_participants = competition_json[competition_key]["num_participants"]
+        num_part, df = add_points_to_data(df, num_participants)
+
+        # removing possible blanc spaces around civil id
+        df['civl_id'] = df['civl_id'].astype(str).str.strip()
+
+        fake_id_counter = get_highest_fake_civil_id_already_in_use(json_data)
+
+        def replace_zero_with_fake(cid):
+            global fake_id_counter
+            if cid == "0":
+                new_cid = f"ZZ{fake_id_counter:03d}"  # e.g. ZZ001, ZZ002
+                fake_id_counter += 1
+                return new_cid
+            return cid
+
+        # Replace civil id's "0" with a fake ID
+        df['civl_id'] = df['civl_id'].apply(replace_zero_with_fake)
+
+        # remove trailing blank spaces
+        df['name'] = df['name'].str.strip().str.title()
+        df['first_name'] = df['first_name'].str.strip().str.title()
+        df['glider'] = df['glider'].fillna("").str.strip()
+
+        # add data to json
+        json_data = add_data_to_json(json_data, df, competition_key)
+
+
+def data_cleaning(json_data: dict):
+    for athlete in json_data.keys():
+        json_data[athlete]["glider"] = normalize_glider_name(json_data[athlete]["glider"])
+        json_data[athlete]["gender"] = normalize_gender(json_data[athlete]["gender"])
+        json_data[athlete]["nat"] = normalize_nationality(json_data[athlete]["nat"])
+
+    find_duplicate_athletes(json_data)
+
+
+def generate_pdfs(competition_json: dict, json_data: dict):
+    all_competitions = competition_json.keys()
+
+    df_female, df_male, df_overall = generate_pandas_data_frames(json_data, all_competitions)
+
+    # Filter out rows where total_points is 0
+    df_female = df_female[df_female["total_points"] != 0]
+    df_male = df_male[df_male["total_points"] != 0]
+    df_overall = df_overall[df_overall["total_points"] != 0]
+
+
+    # Sort by total points descending
+    df_female.sort_values("total_points", ascending=False, inplace=True)
+    df_male.sort_values("total_points", ascending=False, inplace=True)
+    df_overall.sort_values("total_points", ascending=False, inplace=True)
+
+    # generate the PDFs
+    generate_single_pdf(json_data, competition_json, df_female, WOMEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_female.pdf")
+    generate_single_pdf(json_data, competition_json, df_male, MEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_male.pdf")
+    generate_single_pdf(json_data, competition_json, df_overall, OVERALL_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_overall.pdf")
+
+def main():
+    print(BASE_DIR)
+    print(DATA_DIR)
+    # Load existing JSON data
+    data_json = load_json(JSON_PATH)
+
+    # Load competition JSON data
+    competition_json = load_json(COMPETITION_PATH)
+
+    # Process each Excel file and update JSON data
+    process_excel_files(JSON_KEYS, EXCEL_FILES, RESULTS_DIR, data_json, competition_json)
+
+    # Clean the data
+    data_cleaning(data_json)
+
+    # Generate PDF report
+    generate_pdfs(competition_json, data_json)
+
+    # Save the updated JSON data
+    save_json(data_json, JSON_PATH)
+
+if __name__ == "__main__":
+    main()
