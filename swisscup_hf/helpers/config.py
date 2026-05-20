@@ -1,4 +1,5 @@
 from pathlib import Path
+import datetime
 
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -18,6 +19,9 @@ WOMEN_TITLE = "Swissleague Hike and Fly Female Ranking"
 MEN_TITLE = "Swissleague Hike and Fly Male Ranking"
 JUNIOR_TITLE = "Swissleague Hike and Fly Junior Ranking (U26)"
 INFO_TEXT = "For feedbacks, please contact: sport@shv-fsvl.ch"
+
+# Year for Junior Ranking
+CURRENT_YEAR = datetime.datetime.now().year
 
 # File Prefix
 FILE_PREFIX = "swisscup_hf_2026"

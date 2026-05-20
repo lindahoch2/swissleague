@@ -9,7 +9,8 @@ from helpers.data_handling import (
     normalize_glider_name,
     normalize_gender,
     normalize_nationality,
-    check_duplicate_athletes
+    check_duplicate_athletes,
+    extract_year
 )
 from helpers.pdf import generate_pandas_data_frames, generate_single_pdf
 
@@ -21,8 +22,10 @@ def process_excel_files(json_keys: list, excel_files: list, results_path: str, j
         df = pd.read_excel(excel_path)
 
         # Select only the necessary columns and rename for consistency
-        df = df[['Rank', 'First Name', 'Last Name', 'Gender', 'CIVL ID', 'Nat', 'Glider']]
-        df.columns = ['rank', 'first_name', 'name', 'gender', 'civl_id', 'nat', 'glider']
+        df = df[['Rank', 'First Name', 'Last Name', 'Gender', 'CIVL ID', 'Nat', 'Glider', 'Birth Date']]
+        df.columns = ['rank', 'first_name', 'name', 'gender', 'civl_id', 'nat', 'glider', 'birth_day']
+
+        df['birth_year'] = df['birth_day'].apply(extract_year)
 
         # Evaluating the Points received based on ranking
         # Fallback to len(df) if the competition key or "num_participants" is missing
@@ -80,23 +83,26 @@ def data_cleaning(json_data: dict):
 def generate_pdfs(competition_json: dict, json_data: dict, comp_key: str):
     all_competitions = competition_json.keys()
 
-    df_female, df_male, df_overall = generate_pandas_data_frames(json_data, all_competitions)
+    df_female, df_male, df_u26, df_overall = generate_pandas_data_frames(json_data, all_competitions)
 
     # Filter out rows where total_points is 0
     df_female = df_female[df_female["total_points"] != 0]
     df_male = df_male[df_male["total_points"] != 0]
     df_overall = df_overall[df_overall["total_points"] != 0]
-
+    df_u26 = df_u26[df_u26["total_points"] != 0]
 
     # Sort by total points descending
     df_female.sort_values("total_points", ascending=False, inplace=True)
     df_male.sort_values("total_points", ascending=False, inplace=True)
     df_overall.sort_values("total_points", ascending=False, inplace=True)
+    df_u26.sort_values("total_points", ascending=False, inplace=True)
 
     # generate the PDFs
     generate_single_pdf(json_data, competition_json, df_female, WOMEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_female.pdf")
     generate_single_pdf(json_data, competition_json, df_male, MEN_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_male.pdf")
     generate_single_pdf(json_data, competition_json, df_overall, OVERALL_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_overall.pdf")
+    generate_single_pdf(json_data, competition_json, df_u26, JUNIOR_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_junior.pdf")
+
 
 def main():
     # Set up argument parser

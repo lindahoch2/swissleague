@@ -7,9 +7,10 @@ from reportlab.platypus import Image
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.colors import grey
-from helpers.config import LOGO_PATH, INFO_TEXT
+from helpers.config import LOGO_PATH, INFO_TEXT, CURRENT_YEAR
 
-def _add_data_to_lists(overall_rows: list, gender_rows: list, athlete_data: dict, competitions: list, civil_id):
+
+def _extract_necessary_info_for_pdf(athlete_data: dict, competitions: list, civil_id):
     row = {
         "name": f"{athlete_data['first_name']} {athlete_data['name']}",
         }
@@ -24,27 +25,36 @@ def _add_data_to_lists(overall_rows: list, gender_rows: list, athlete_data: dict
     row["nat"] = athlete_data["nat"]
     row["glider"] = athlete_data["glider"]
 
-    # add the data row to the lists
-    overall_rows.append(row), gender_rows.append(row)
+    return row
 
-    return overall_rows, gender_rows
+
+def _is_u26(athletes_info: dict):
+    birth_year = athletes_info.get("birth_year", 0)
+    return birth_year > 0 and (CURRENT_YEAR - birth_year) <= 26
 
 
 def generate_pandas_data_frames(json_data: dict, all_competitions: list):
     rows_female = []
     rows_male = []
+    rows_u26 = []
     rows_overall = []
+
     for civl_id in json_data.keys():
+        row = _extract_necessary_info_for_pdf(json_data[civl_id], all_competitions, civl_id)
+        rows_overall.append(row)
         if json_data[civl_id]['gender'] == 'F':
-            rows_overall, rows_female = _add_data_to_lists(rows_overall, rows_female, json_data[civl_id], all_competitions, civl_id)
+            rows_female.append(row)
         else:
-            rows_overall, rows_male = _add_data_to_lists(rows_overall, rows_male, json_data[civl_id], all_competitions, civl_id)
+            rows_male.append(row)
+        if(_is_u26(json_data[civl_id])):
+            rows_u26.append(row)
 
     df_female = pd.DataFrame(rows_female)
     df_male = pd.DataFrame(rows_male)
     df_overall = pd.DataFrame(rows_overall)
+    df_u26 = pd.DataFrame(rows_u26)
 
-    return df_female, df_male, df_overall
+    return df_female, df_male, df_u26, df_overall
 
 
 def _extract_competition_name_list(competition_json: dict):

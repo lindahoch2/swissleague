@@ -118,6 +118,7 @@ def _add_athlete_data(json_data, data_row):
         "name": data_row['name'],
         "first_name": data_row['first_name'],
         "gender": data_row['gender'],
+        "birth_year": data_row['birth_year'],
         "total_points": 0,
         "nat": data_row['nat'],
         "glider": data_row['glider'],
@@ -143,6 +144,10 @@ def _process_single_athlete_record(json_data, row, competition_key):
     if civl_id in json_data:
         _check_civl_id_name_discrepancy(json_data, row)
         _check_and_update_glider(json_data, row)
+
+        # Add birth year if it was previously missing in the JSON
+        if json_data[civl_id].get('birth_year', 0) == 0 and row['birth_year'] != 0:
+            json_data[civl_id]['birth_year'] = row['birth_year']
     else:
         _add_athlete_data(json_data, row)
 
@@ -355,4 +360,31 @@ def normalize_nationality(nationality, info):
             nationality = replacements[nationality]
 
     return nationality
+
+
+def extract_year(date_val):
+    if pd.isna(date_val):
+        return 0
+
+    # If Pandas already successfully parsed it as a datetime object
+    if hasattr(date_val, 'year'):
+        return date_val.year
+
+    date_str = str(date_val).strip()
+
+    try:
+        # Check if it's in YYYY-MM-DD format
+        if '-' in date_str:
+            # Splits "1996-09-21 00:00:00" into ["1996", "09", "21 00:00:00"]
+            return int(date_str.split('-')[0])
+
+        # Check if it's in DD/MM/YYYY format
+        elif '/' in date_str:
+            # Splits "21/09/1996" into ["21", "09", "1996"]
+            return int(date_str.split('/')[-1])
+
+    except ValueError:
+        print(f"⚠️ Unrecognized date format: '{date_str}'. Unable to extract year.")
+
+    return 0
 
