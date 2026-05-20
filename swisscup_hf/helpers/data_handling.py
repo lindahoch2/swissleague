@@ -6,10 +6,15 @@ def _check_civl_id_name_discrepancy(json_data, row):
     civl_id = str(row['civl_id'])
 
     for key in ['name', 'first_name']:
-        json_val = json_data[civl_id][key]
-        excel_val = row[key]
+        json_val = str(json_data[civl_id][key])
+        excel_val = str(row[key])
 
-        if json_val != excel_val:
+        # Create normalized versions for comparison: lowercase and no spaces
+        json_comp = json_val.lower().replace(" ", "")
+        excel_comp = excel_val.lower().replace(" ", "")
+
+        # Only prompt if the normalized strings actually differ
+        if json_comp != excel_comp:
             print(f"\n⚠️ Discrepancy found for civl_id {civl_id} ({json_data[civl_id]['first_name']} {json_data[civl_id]['name']}) in {key.replace('_', ' ').title()}:")
             print(f"  [1] JSON value:  {json_val}")
             print(f"  [2] Excel value: {excel_val}")
@@ -43,11 +48,15 @@ def _glider_user_interaction(name, old_glider, new_glider):
 
 def _check_and_update_glider(json_data, row):
     civl_id = str(row['civl_id'])
-    old_glider = json_data[civl_id]['glider']
-    new_glider = row['glider']
+    old_glider = str(json_data[civl_id]['glider'])
+    new_glider = str(row['glider'])
 
-    if old_glider != new_glider:
-        if old_glider == "":
+    # Create normalized versions for comparison: lowercase and no spaces
+    old_comp = old_glider.lower().replace(" ", "")
+    new_comp = new_glider.lower().replace(" ", "")
+
+    if old_comp != new_comp:
+        if old_comp == "":
             json_data[civl_id]['glider'] = new_glider
         else:
             name = f"{json_data[civl_id]['first_name']} {json_data[civl_id]['name']}"
