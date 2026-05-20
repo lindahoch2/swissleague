@@ -51,4 +51,4 @@ Utilities to load, compare, and modify Excel files (e.g., `liga_signups.xlsx`, `
    ```
 
 ## License
-This project is open-source and available under the MIT License.
+This project is open-source and available under the [MIT License](LICENSE).
