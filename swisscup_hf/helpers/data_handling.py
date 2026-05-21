@@ -342,7 +342,10 @@ def normalize_gender(gender):
 
 
 def normalize_nationality(nationality, info):
-    nationality = nationality.strip().upper()
+    if pd.isna(nationality) or not isinstance(nationality, str):
+        nationality = ""
+    else:
+        nationality = nationality.strip().upper()
 
     replacements = {
         "CH": "SUI", "IT": "ITA", "UK": "GBR", "FR": "FRA",
