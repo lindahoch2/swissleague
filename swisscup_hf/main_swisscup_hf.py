@@ -41,7 +41,10 @@ def process_excel_files(json_keys: list, excel_files: list, results_path: str, j
                     "num_participants": num_participants,
                     "physical": False
                 }
+                print(f"Added new entry for {competition_key} in competition JSON with 'num_participants': {num_participants}.")
             competition_json[competition_key]["num_participants"] = num_participants
+            save_json(competition_json, COMPETITION_PATH)
+            print(f"Updated 'num_participants' for {competition_key} in competition JSON.")
 
         num_part, df = add_points_to_data(df, num_participants)
 
