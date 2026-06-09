@@ -2,6 +2,27 @@ import pandas as pd
 from collections import defaultdict
 
 
+def renaming_pandas_columns(df: pd.DataFrame):
+    # Catch different column naming for birthdate and rename to a consistent name
+    df = df.rename(columns={'Birthdate': 'Birth Date'})
+    df = df.rename(columns={'Date of birth': 'Birth Date'})
+
+    if 'Glider' not in df.columns:
+        # Dynamically find the columns, allowing for slight variations (like 'Manufacturerb')
+        manuf_col = next((col for col in df.columns if 'Manufacturer' in col), None)
+        model_col = next((col for col in df.columns if 'Model' in col or 'model' in col), None)
+
+        if manuf_col and model_col:
+            # Combine the two columns, handling any potential NaN values safely
+            df['Glider'] = df[manuf_col].fillna("").astype(str) + " " + df[model_col].fillna("").astype(str)
+            df['Glider'] = df['Glider'].str.strip()
+        else:
+            # Fallback to an empty string if neither Glider nor the split columns are found
+            df['Glider'] = ""
+
+    return df
+
+
 def _check_civl_id_name_discrepancy(json_data, row):
     civl_id = str(row['civl_id'])
 

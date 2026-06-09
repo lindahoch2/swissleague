@@ -10,7 +10,8 @@ from helpers.data_handling import (
     normalize_gender,
     normalize_nationality,
     check_duplicate_athletes,
-    extract_year
+    extract_year,
+    renaming_pandas_columns
 )
 from helpers.pdf import generate_pandas_data_frames, generate_single_pdf
 
@@ -21,8 +22,7 @@ def process_excel_files(json_keys: list, excel_files: list, results_path: str, j
         print(f"Processing {excel_path}...")
         df = pd.read_excel(excel_path)
 
-        # Catch different column naming for birthdate and rename to a consistent name
-        df = df.rename(columns={'Birthdate': 'Birth Date'})
+        df = renaming_pandas_columns(df)
 
         # Select only the necessary columns and rename for consistency
         df = df[['Rank', 'First Name', 'Last Name', 'Gender', 'CIVL ID', 'Nat', 'Glider', 'Birth Date']]
