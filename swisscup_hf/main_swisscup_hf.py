@@ -21,6 +21,9 @@ def process_excel_files(json_keys: list, excel_files: list, results_path: str, j
         print(f"Processing {excel_path}...")
         df = pd.read_excel(excel_path)
 
+        # Catch different column naming for birthdate and rename to a consistent name
+        df = df.rename(columns={'Birthdate': 'Birth Date'})
+
         # Select only the necessary columns and rename for consistency
         df = df[['Rank', 'First Name', 'Last Name', 'Gender', 'CIVL ID', 'Nat', 'Glider', 'Birth Date']]
         df.columns = ['rank', 'first_name', 'name', 'gender', 'civl_id', 'nat', 'glider', 'birth_day']
