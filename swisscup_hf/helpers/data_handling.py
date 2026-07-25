@@ -219,6 +219,9 @@ def normalize_glider_name(glider):
         "oxp2": "oxa 2",
         "omegauls": "omega uls",
         "air design": "airdesign",
+        "zéolite": "zeolite",
+        "apls": "alps",
+        "sigma11": "sigma 11",
     }
     for old, new in replacements.items():
         glider = glider.replace(old, new)
@@ -261,6 +264,7 @@ def normalize_glider_name(glider):
         "Dls": "DLS",
         "Rs": "RS",
         "Gt": "GT",
+        "Bgd": "BGD",
     }
     for wrong, correct in brand_fixes.items():
         glider = glider.replace(wrong, correct)
