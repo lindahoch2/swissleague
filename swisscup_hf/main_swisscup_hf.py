@@ -11,7 +11,8 @@ from helpers.data_handling import (
     replace_zero_with_fake,
     data_cleaning,
     extract_year,
-    renaming_pandas_columns
+    renaming_pandas_columns,
+    clean_dataframe_text
 )
 from helpers.pdf import generate_pandas_data_frames, generate_single_pdf
 
@@ -37,13 +38,6 @@ def get_or_update_participants(comp_key, competition_json, df_len):
             competition_json[comp_key]["num_participants"] = num_participants
         save_json(competition_json, COMPETITION_PATH)
     return num_participants
-
-def clean_dataframe_text(df):
-    df['civl_id'] = df['civl_id'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-    df['name'] = df['name'].str.strip().str.title()
-    df['first_name'] = df['first_name'].str.strip().str.title()
-    df['glider'] = df['glider'].fillna("").str.strip()
-    return df
 
 def process_excel_files(json_keys, excel_files, results_path, athletes_dict, competition_json, resolver):
     fake_id_counter = get_highest_fake_civil_id_already_in_use(athletes_dict)

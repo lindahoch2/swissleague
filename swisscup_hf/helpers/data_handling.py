@@ -161,14 +161,14 @@ def data_cleaning(athletes_dict: dict, resolver):
     """Iterates through athletes and cleans up inconsistencies."""
     for civl_id, athlete in athletes_dict.items():
         athlete_info = f"{civl_id}: {athlete.name} {athlete.first_name}"
-        athlete.glider = normalize_glider_name(athlete.glider)
+        athlete.glider = _normalize_glider_name(athlete.glider)
         athlete.gender = normalize_gender(athlete.gender, resolver)
         athlete.nat = normalize_nationality(athlete.nat, athlete_info, resolver)
 
     check_duplicate_athletes(athletes_dict, resolver)
 
 
-def normalize_glider_name(glider):
+def _normalize_glider_name(glider):
     if pd.isna(glider):
         return ""
 
@@ -176,10 +176,21 @@ def normalize_glider_name(glider):
 
     # Common replacements
     replacements = {
-        "six": "6", "swift6": "swift 6", "7p": "7 p", "6p": "6 p",
-        "3p": "3 p", "volt4": "volt 4", "volt5": "volt 5", "enzo3": "enzo 3",
-        "oxp2": "oxa 2", "omegauls": "omega uls", "air design": "airdesign",
-        "zéolite": "zeolite", "apls": "alps", "sigma11": "sigma 11",
+        "six": "6",
+        "swift6": "swift 6",
+        "7p": "7 p",
+        "6p": "6 p",
+        "3p": "3 p",
+        "volt4": "volt 4",
+        "volt5": "volt 5",
+        "enzo3": "enzo 3",
+        "oxp2": "oxa 2",
+        "omegauls": "omega uls",
+        "air design": "airdesign",
+        "zéolite": "zeolite",
+        "apls": "alps",
+        "sigma11": "sigma 11",
+        "artic": "artik",
     }
     for old, new in replacements.items():
         glider = glider.replace(old, new)
@@ -324,3 +335,13 @@ def _merge_duplicate_athletes(unique_ids, target_id, athletes_dict):
 
     target_athlete.total_points = round(total_points, 2)
     print(f"✅ Successfully merged into {target_id}.")
+
+def clean_dataframe_text(df):
+    df['civl_id'] = df['civl_id'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    df['name'] = df['name'].str.strip().str.title()
+    df['first_name'] = df['first_name'].str.strip().str.title()
+
+    # Apply normalization to incoming Excel data immediately
+    df['glider'] = df['glider'].apply(_normalize_glider_name)
+
+    return df
