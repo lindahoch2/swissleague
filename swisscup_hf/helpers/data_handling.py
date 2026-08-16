@@ -147,6 +147,11 @@ def extract_year(date_val):
             # Splits "21/09/1996" into ["21", "09", "1996"]
             return int(date_str.split('/')[-1])
 
+        # Check if it's just a year (handles "1996", 1996, or "1996.0")
+        else:
+            year = int(float(date_str))
+            return year if 1900 <= year <= 2100 else 0  # Basic sanity check for year range
+
     except ValueError:
         print(f"⚠️ Unrecognized date format: '{date_str}'. Unable to extract year.")
 
