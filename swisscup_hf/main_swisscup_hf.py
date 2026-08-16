@@ -43,7 +43,7 @@ def process_excel_files(json_keys, excel_files, results_path, athletes_dict, com
     fake_id_counter = get_highest_fake_civil_id_already_in_use(athletes_dict)
 
     for comp_key, excel_file in zip(json_keys, excel_files):
-        print(f"Processing {excel_file}...")
+        print(f"Processing {excel_file} (Key: {comp_key})...")
 
         # 1. Extract
         df = read_and_standardize_excel(results_path, excel_file)
@@ -83,70 +83,117 @@ def generate_pdfs(competition_json: dict, json_data: dict, comp_key: str):
     generate_single_pdf(json_data, competition_json, df_overall, OVERALL_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_overall.pdf")
     generate_single_pdf(json_data, competition_json, df_u26, JUNIOR_TITLE, OUTPUT_DIR / f"{FILE_PREFIX}_{comp_key}_junior.pdf")
 
-def main():
-    # Set up argument parser
-    parser = argparse.ArgumentParser(description="Process Swissleague Hike and Fly results.")
-    parser.add_argument(
-        '-c', '--comps',
-        nargs='+',
-        help="List of competition keys to evaluate (e.g., -c jhf eiger airtour). If omitted, runs all."
+
+def get_or_register_competition_key(filename: str, competition_json: dict, resolver: CLIConflictResolver) -> str:
+    """Finds the competition key for a file, prompting the user if it's unknown."""
+    # 1. Exact Match
+    for key, data in competition_json.items():
+        if data.get("filename") == filename:
+            return key
+
+    # 2. Ask user via Resolver
+    similar_keys = sorted(
+        [k for k in competition_json.keys() if k.lower() in filename.lower()], 
+        key=len, 
+        reverse=True
     )
-    args = parser.parse_args()
+    comp_key, new_config = resolver.resolve_unknown_competition(filename, similar_keys, competition_json)
 
-    print(f"Base Directory: {BASE_DIR}")
-    print(f"Data Directory: {DATA_DIR}")
+    # 3. Update Configuration if a key was chosen
+    if comp_key:
+        if new_config:
+            competition_json[comp_key] = new_config
+        competition_json[comp_key]["filename"] = filename
+        save_json(competition_json, COMPETITION_PATH)
 
-    # Determine which competitions to run
-    selected_keys = args.comps if args.comps else JSON_KEYS
+    return comp_key
 
-    keys_to_process = []
-    files_to_process = []
 
-    # Map the selected keys to their corresponding excel files
-    for key, file in zip(JSON_KEYS, EXCEL_FILES):
-        if key in selected_keys:
-            keys_to_process.append(key)
-            files_to_process.append(file)
+def should_process_competition(comp_key: str, competition_json: dict, args: argparse.Namespace) -> bool:
+    """Determines if a competition should be processed based on args and current state."""
+    if args.comps and comp_key not in args.comps:
+        return False
 
-    # Validate inputs to catch any typos in the command line
-    invalid_keys = set(selected_keys) - set(JSON_KEYS)
-    if invalid_keys:
-        print(f"\nWarning: The following keys are invalid and will be ignored: {', '.join(invalid_keys)}")
-        print(f"Valid keys are: {', '.join(JSON_KEYS)}\n")
+    is_explicitly_requested = args.comps and comp_key in args.comps
+    is_processed = competition_json.get(comp_key, {}).get("num_participants", 0) > 0
 
-    if not keys_to_process:
-        print("No valid competitions selected. Exiting.")
-        return
+    if is_processed and not (args.force or is_explicitly_requested):
+        return False
 
-    print(f"Evaluating competitions: {', '.join(keys_to_process)}")
+    return True
 
-    # Load existing JSON data and convert to Athlete objects
-    raw_json = load_json(JSON_PATH)
-    athletes_dict = {civl_id: Athlete.from_dict(civl_id, data) for civl_id, data in raw_json.items()}
 
-    # Load competition JSON data
+def discover_files_to_process(available_files: list, competition_json: dict, args: argparse.Namespace, resolver: CLIConflictResolver) -> tuple[list, list]:
+    """Iterates through files and filters down to the ones that need processing."""
+    keys_to_process, files_to_process = [], []
+
+    for filepath in sorted(available_files):
+        filename = filepath.name
+        comp_key = get_or_register_competition_key(filename, competition_json, resolver)
+
+        if not comp_key:
+            print(f"⏭️  Skipping '{filename}'.")
+            continue
+
+        if not should_process_competition(comp_key, competition_json, args):
+            print(f"⏩ Skipping '{filename}' (already processed). Use --force to reprocess.")
+            continue
+
+        keys_to_process.append(comp_key)
+        files_to_process.append(filename)
+
+    return keys_to_process, files_to_process
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Process Swissleague Hike and Fly results.")
+    parser.add_argument('-c', '--comps', nargs='+', help="List of competition keys to explicitly evaluate (e.g., -c jhf eiger).")
+    parser.add_argument('-f', '--force', action='store_true', help="Force reprocessing of all competitions.")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_arguments()
+    print(f"Base Directory: {BASE_DIR}\nData Directory: {DATA_DIR}")
+
     competition_json = load_json(COMPETITION_PATH)
     resolver = CLIConflictResolver()
 
-    # Process and Clean
+    # 1. Discover and Filter Files
+    available_files = list(RESULTS_DIR.glob("*.xlsx"))
+    if not available_files:
+        print(f"No Excel files found in {RESULTS_DIR}. Exiting.")
+        return
+
+    keys_to_process, files_to_process = discover_files_to_process(
+        available_files, competition_json, args, resolver
+    )
+
+    if not keys_to_process:
+        print("\nNo valid or new competitions selected. Exiting.")
+        return
+
+    print(f"\nEvaluating competitions: {', '.join(keys_to_process)}")
+
+    # 2. Load Base Data
+    raw_json = load_json(JSON_PATH)
+    athletes_dict = {civl_id: Athlete.from_dict(civl_id, data) for civl_id, data in raw_json.items()}
+
+    # 3. Process and Clean
     process_excel_files(keys_to_process, files_to_process, RESULTS_DIR, athletes_dict, competition_json, resolver)
     data_cleaning(athletes_dict, resolver)
 
-    # Save back to raw dictionaries for JSON serialization
+    # 4. Save and Generate Output
     updated_raw_json = {civl_id: ath.to_dict() for civl_id, ath in athletes_dict.items()}
     save_json(updated_raw_json, JSON_PATH)
 
-    # Save the additional Intermediate Results
-    last_key = ""
-    if keys_to_process:
-        last_key = keys_to_process[-1]
+    last_key = keys_to_process[-1]
     additional_json_path = INTERMEDIATE_DIR / f"swissleague_data_2026_{last_key}.json"
     save_json(updated_raw_json, additional_json_path)
     print(f"Additional JSON saved to: {additional_json_path}")
 
-    # Generate PDFs
-    if keys_to_process:
-        generate_pdfs(competition_json, updated_raw_json, keys_to_process[-1])
+    generate_pdfs(competition_json, updated_raw_json, last_key)
+
 
 if __name__ == "__main__":
     main()

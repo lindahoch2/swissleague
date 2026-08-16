@@ -43,3 +43,34 @@ class CLIConflictResolver:
             target_id = input("Type the exact CIVL ID to KEEP (or press Enter to cancel): ").strip()
             return True, target_id
         return False, ""
+
+    def resolve_unknown_competition(self, filename: str, similar_keys: list, existing_keys: dict) -> tuple[str, dict]:
+        """Prompts the user to map an unknown file to a competition key."""
+        print(f"\n❓ Unknown file detected: '{filename}'")
+        comp_key = None
+
+        if similar_keys:
+            suggested_key = similar_keys[0]
+            resp = input(f"   Is this for competition '{suggested_key}'? (y/n): ").strip().lower()
+            if resp == 'y':
+                comp_key = suggested_key
+
+        if not comp_key:
+            comp_key = input(f"   Please enter a short key for this competition (e.g., 'eiger') or type 'skip': ").strip().lower()
+
+        if not comp_key or comp_key == 'skip':
+            return None, None
+
+        # If it's a brand new key, ask for the configuration details
+        if comp_key not in existing_keys:
+            title = input(f"   Enter the full title for '{comp_key}': ").strip()
+            phys_resp = input(f"   Is this a physical competition? (y/n): ").strip().lower()
+
+            new_config = {
+                "title": title if title else comp_key.capitalize(),
+                "num_participants": 0,
+                "physical": phys_resp == 'y'
+            }
+            return comp_key, new_config
+
+        return comp_key, None
