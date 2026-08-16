@@ -41,10 +41,17 @@ def _check_civl_id_name_discrepancy(athlete: Athlete, row, resolver):
 
 def _check_and_update_glider(athlete: Athlete, row, resolver):
     old_glider = athlete.glider
-    new_glider = str(row.glider)
+    new_glider = str(row.glider).strip()
+
+    # Define what constitutes an "empty" incoming glider
+    empty_glider_values = ["", "nan", "-", "none", "null"]
+
+    # If the new glider is empty, keep the old one without asking
+    if new_glider.lower() in empty_glider_values:
+        return
 
     if old_glider.lower().replace(" ", "") != new_glider.lower().replace(" ", ""):
-        if old_glider == "":
+        if old_glider == "" or old_glider.lower() in empty_glider_values:
             athlete.glider = new_glider
         else:
             name = f"{athlete.first_name} {athlete.name}"
