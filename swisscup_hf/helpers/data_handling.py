@@ -1,6 +1,6 @@
+from helpers.models import Athlete, CompetitionResult
 import pandas as pd
 from collections import defaultdict
-
 
 def renaming_pandas_columns(df: pd.DataFrame):
     # Catch different column naming for birthdate and rename to a consistent name
@@ -22,69 +22,33 @@ def renaming_pandas_columns(df: pd.DataFrame):
 
     return df
 
+def replace_zero_with_fake(cid, fake_id_counter: int):
+    cid_str = str(cid).strip()
+    if cid_str.lower() == "nan" or cid_str in ["0", "", "none"]:
+        return f"ZZ{fake_id_counter:03d}"
+    return cid_str
 
-def _check_civl_id_name_discrepancy(json_data, row):
-    civl_id = str(row['civl_id'])
-
+def _check_civl_id_name_discrepancy(athlete: Athlete, row, resolver):
     for key in ['name', 'first_name']:
-        json_val = str(json_data[civl_id][key])
-        excel_val = str(row[key])
+        json_val = getattr(athlete, key)
+        excel_val = getattr(row, key)
 
-        # Create normalized versions for comparison: lowercase and no spaces
-        json_comp = json_val.lower().replace(" ", "")
-        excel_comp = excel_val.lower().replace(" ", "")
+        if json_val.lower().replace(" ", "") != excel_val.lower().replace(" ", ""):
+            resolved_val = resolver.resolve_name_discrepancy(
+                athlete.civl_id, f"{athlete.first_name} {athlete.name}", key, json_val, excel_val
+            )
+            setattr(athlete, key, resolved_val)
 
-        # Only prompt if the normalized strings actually differ
-        if json_comp != excel_comp:
-            print(f"\n⚠️ Discrepancy found for civl_id {civl_id} ({json_data[civl_id]['first_name']} {json_data[civl_id]['name']}) in {key.replace('_', ' ').title()}:")
-            print(f"  [1] JSON value:  {json_val}")
-            print(f"  [2] Excel value: {excel_val}")
+def _check_and_update_glider(athlete: Athlete, row, resolver):
+    old_glider = athlete.glider
+    new_glider = str(row.glider)
 
-            while True:
-                choice = input(f"Which value should be kept? (1/2): ").strip()
-                if choice == '1':
-                    # Do nothing, keep existing JSON data
-                    break
-                elif choice == '2':
-                    # Update JSON with Excel data
-                    json_data[civl_id][key] = excel_val
-                    break
-                else:
-                    print("Invalid input. Please enter 1 or 2.")
-
-
-def _glider_user_interaction(name, old_glider, new_glider):
-    print(f"\n🪂 Discrepancy in glider found for {name}:")
-    print(f"  [1] Old glider (JSON):  {old_glider}")
-    print(f"  [2] New glider (Excel): {new_glider}")
-    print(f"  [3] Type a custom glider name")
-
-    while True:
-        choice = input("Which glider should be used? (1/2/3): ").strip()
-        if choice == '1': return old_glider
-        if choice == '2': return new_glider
-        if choice == '3': return input("Enter custom glider name: ").strip()
-        print("Invalid input.")
-
-
-def _check_and_update_glider(json_data, row):
-    civl_id = str(row['civl_id'])
-    old_glider = str(json_data[civl_id]['glider'])
-    new_glider = str(row['glider'])
-
-    # Create normalized versions for comparison: lowercase and no spaces
-    old_comp = old_glider.lower().replace(" ", "")
-    new_comp = new_glider.lower().replace(" ", "")
-
-    if old_comp != new_comp:
-        if old_comp == "":
-            json_data[civl_id]['glider'] = new_glider
+    if old_glider.lower().replace(" ", "") != new_glider.lower().replace(" ", ""):
+        if old_glider == "":
+            athlete.glider = new_glider
         else:
-            name = f"{json_data[civl_id]['first_name']} {json_data[civl_id]['name']}"
-            # Call the UI function, then update the data
-            resolved_glider = _glider_user_interaction(name, old_glider, new_glider)
-            json_data[civl_id]['glider'] = resolved_glider
-
+            name = f"{athlete.first_name} {athlete.name}"
+            athlete.glider = resolver.resolve_glider(name, old_glider, new_glider)
 
 def add_points_to_data(df: pd.DataFrame, num_participants):
     # Formula: 100 - 100 * (rank - 1) / (num_participants -1)
@@ -92,97 +56,46 @@ def add_points_to_data(df: pd.DataFrame, num_participants):
 
     return num_participants, df
 
-
-def _check_if_competition_already_exists(json_data, civil_id, competition_key):
-    if competition_key in json_data[civil_id]["competitions"]:
-      print(f"Competition {competition_key} already exists for civl_id {civil_id}")
-      return True
-    return False
-
-
-def _add_competition_data(json_data, data_row, competition_key):
-    json_data[str(data_row['civl_id'])]["competitions"][competition_key] = {
-        "rank": data_row['rank'],
-        "points": data_row['points'],
-        "counts": True
-    }
-    return json_data
-
-
-def _update_total_points(json_data, civil_id:str, new_points, new_comp_key):
-    athletes_comp_keys = json_data[civil_id]["competitions"].keys()
-    if len(athletes_comp_keys) <= 4:
-        total_points = json_data[civil_id]["total_points"] + new_points
-        json_data[civil_id]["total_points"] = round(total_points, 2)
-
-    else:
-        # Find lowest points from previous comps
-        lowest_points = new_points
-        lowest_key = new_comp_key
-
-        for comp_key in athletes_comp_keys:
-            if json_data[civil_id]["competitions"][comp_key]['counts'] and json_data[civil_id]["competitions"][comp_key]['points'] < lowest_points:
-              lowest_points = json_data[civil_id]["competitions"][comp_key]['points']
-              lowest_key = comp_key
-
-        # update remove lowest_competition from total points
-        json_data[civil_id]["competitions"][lowest_key]['counts'] = False
-        json_data[civil_id]["total_points"] += new_points - lowest_points
-        json_data[civil_id]["total_points"] = round(json_data[civil_id]["total_points"], 2)
-    return json_data
-
-
-def _add_athlete_data(json_data, data_row):
-    print()
-    print(f"Adding athlete data for civl_id {data_row['civl_id']}")
-    json_data[str(data_row['civl_id'])] = {
-        "name": data_row['name'],
-        "first_name": data_row['first_name'],
-        "gender": data_row['gender'],
-        "birth_year": data_row['birth_year'],
-        "total_points": 0,
-        "nat": data_row['nat'],
-        "glider": data_row['glider'],
-        "competitions": {}
-    }
-    return json_data
-
-
 def _resolve_fake_civl_id(json_data, row):
     """Returns the real CIVL ID if a matching fake one is found, else the original."""
-    if "Z" in str(row['civl_id']):
+    if "Z" in str(row.civl_id):
         for json_civl_id, athlete in json_data.items():
-            if athlete['name'] == row['name'] and athlete['first_name'] == row['first_name']:
+            if athlete.name == row.name and athlete.first_name == row.first_name:
                 return json_civl_id
-    return row['civl_id']
+    return row.civl_id
 
+def _process_single_athlete_record(athletes_dict: dict, row, competition_key: str, resolver):
+    # row is now a namedtuple from itertuples(), access via dot notation
+    civl_id = _resolve_fake_civl_id(athletes_dict, row)
 
-def _process_single_athlete_record(json_data, row, competition_key):
-    """Handles the full flow for a single athlete row."""
-    row['civl_id'] = _resolve_fake_civl_id(json_data, row)
-    civl_id = str(row['civl_id'])
-
-    if civl_id in json_data:
-        _check_civl_id_name_discrepancy(json_data, row)
-        _check_and_update_glider(json_data, row)
-
-        # Add birth year if it was previously missing in the JSON
-        if json_data[civl_id].get('birth_year', 0) == 0 and row['birth_year'] != 0:
-            json_data[civl_id]['birth_year'] = row['birth_year']
+    if civl_id in athletes_dict:
+        athlete = athletes_dict[civl_id]
+        _check_civl_id_name_discrepancy(athlete, row, resolver)
+        _check_and_update_glider(athlete, row, resolver)
+        if athlete.birth_year == 0 and row.birth_year != 0:
+            athlete.birth_year = row.birth_year
     else:
-        _add_athlete_data(json_data, row)
+        # Create new Athlete object
+        athlete = Athlete(
+            civl_id=civl_id,
+            name=row.name,
+            first_name=row.first_name,
+            gender=row.gender,
+            nat=row.nat,
+            glider=row.glider,
+            birth_year=row.birth_year
+        )
+        athletes_dict[civl_id] = athlete
 
-    if not _check_if_competition_already_exists(json_data, civl_id, competition_key):
-        _add_competition_data(json_data, row, competition_key)
-        _update_total_points(json_data, civl_id, row['points'], competition_key)
+    # Add competition and update points
+    if competition_key not in athlete.competitions:
+        athlete.competitions[competition_key] = CompetitionResult(rank=row.rank, points=row.points)
+        athlete.update_total_points(row.points, competition_key)
 
-
-def add_data_to_json(json_data: dict, df: pd.DataFrame, competition_key: str):
-    """Main entry point. Now incredibly clean and readable."""
-    for _, row in df.iterrows():
-        _process_single_athlete_record(json_data, row, competition_key)
-
-    return json_data
+def add_data_to_json(athletes_dict: dict, df: pd.DataFrame, competition_key: str, resolver):
+    # Using itertuples for massive performance gain over iterrows
+    for row in df.itertuples(index=False):
+        _process_single_athlete_record(athletes_dict, row, competition_key, resolver)
 
 
 def get_highest_fake_civil_id_already_in_use(json_data):
@@ -200,28 +113,68 @@ def get_highest_fake_civil_id_already_in_use(json_data):
     return fake_id_counter
 
 
+def _find_duplicate_athletes(json_data):
+    name_map = defaultdict(set)
+
+    # 1. Build the map using a sorted key to handle swapped names automatically
+    for civl_id, data in json_data.items():
+        name = data.get('name', '').strip().lower()
+        first_name = data.get('first_name', '').strip().lower()
+
+        sorted_key = tuple(sorted([name, first_name]))
+        name_map[sorted_key].add(civl_id)
+
+    return name_map
+
+def extract_year(date_val):
+    if pd.isna(date_val):
+        return 0
+
+    # If Pandas already successfully parsed it as a datetime object
+    if hasattr(date_val, 'year'):
+        return date_val.year
+
+    date_str = str(date_val).strip()
+
+    try:
+        # Check if it's in YYYY-MM-DD format
+        if '-' in date_str:
+            # Splits "1996-09-21 00:00:00" into ["1996", "09", "21 00:00:00"]
+            return int(date_str.split('-')[0])
+
+        # Check if it's in DD/MM/YYYY format
+        elif '/' in date_str:
+            # Splits "21/09/1996" into ["21", "09", "1996"]
+            return int(date_str.split('/')[-1])
+
+    except ValueError:
+        print(f"⚠️ Unrecognized date format: '{date_str}'. Unable to extract year.")
+
+    return 0
+
+def data_cleaning(athletes_dict: dict, resolver):
+    """Iterates through athletes and cleans up inconsistencies."""
+    for civl_id, athlete in athletes_dict.items():
+        athlete_info = f"{civl_id}: {athlete.name} {athlete.first_name}"
+        athlete.glider = normalize_glider_name(athlete.glider)
+        athlete.gender = normalize_gender(athlete.gender, resolver)
+        athlete.nat = normalize_nationality(athlete.nat, athlete_info, resolver)
+
+    check_duplicate_athletes(athletes_dict, resolver)
+
+
 def normalize_glider_name(glider):
     if pd.isna(glider):
         return ""
 
-    glider = glider.lower().strip()
+    glider = str(glider).lower().strip()
 
     # Common replacements
     replacements = {
-        "six": "6",
-        "swift6": "swift 6",
-        "7p": "7 p",
-        "6p": "6 p",
-        "3p": "3 p",
-        "volt4": "volt 4",
-        "volt5": "volt 5",
-        "enzo3": "enzo 3",
-        "oxp2": "oxa 2",
-        "omegauls": "omega uls",
-        "air design": "airdesign",
-        "zéolite": "zeolite",
-        "apls": "alps",
-        "sigma11": "sigma 11",
+        "six": "6", "swift6": "swift 6", "7p": "7 p", "6p": "6 p",
+        "3p": "3 p", "volt4": "volt 4", "volt5": "volt 5", "enzo3": "enzo 3",
+        "oxp2": "oxa 2", "omegauls": "omega uls", "air design": "airdesign",
+        "zéolite": "zeolite", "apls": "alps", "sigma11": "sigma 11",
     }
     for old, new in replacements.items():
         glider = glider.replace(old, new)
@@ -257,14 +210,8 @@ def normalize_glider_name(glider):
     # Title-case + brand-specific fixes
     glider = glider.title()
     brand_fixes = {
-        "Airdesign": "AirDesign",
-        "Phi": "PHI",
-        "Supair": "SupAir",
-        "Uls": "ULS",
-        "Dls": "DLS",
-        "Rs": "RS",
-        "Gt": "GT",
-        "Bgd": "BGD",
+        "Airdesign": "AirDesign", "Phi": "PHI", "Supair": "SupAir",
+        "Uls": "ULS", "Dls": "DLS", "Rs": "RS", "Gt": "GT", "Bgd": "BGD",
     }
     for wrong, correct in brand_fixes.items():
         glider = glider.replace(wrong, correct)
@@ -272,101 +219,18 @@ def normalize_glider_name(glider):
     return glider
 
 
-def _find_duplicate_athletes(json_data):
-    name_map = defaultdict(set)
-
-    # 1. Build the map using a sorted key to handle swapped names automatically
-    for civl_id, data in json_data.items():
-        name = data.get('name', '').strip().lower()
-        first_name = data.get('first_name', '').strip().lower()
-
-        sorted_key = tuple(sorted([name, first_name]))
-        name_map[sorted_key].add(civl_id)
-
-    return name_map
-
-
-def _duplicate_athletes_user_interaction(key, unique_ids):
-    print(f"\n👯 Possible duplicate: {key[0].title()} {key[1].title()}")
-    print(f"CIVL IDs found: {', '.join(unique_ids)}")
-
-    action = input("Do you want to merge these records? (y/n): ").strip().lower()
-    if action == 'y':
-        print("Available IDs:", unique_ids)
-        target_id = input("Type the exact CIVL ID to KEEP (or press Enter to cancel): ").strip()
-        return True, target_id
-
-    else:
-        return False, None
-
-
-def _merge_duplicate_athletes(unique_ids, target_id, json_data):
-    source_ids = [cid for cid in unique_ids if cid != target_id]
-
-    for source_id in source_ids:
-        # Safety check: ensure source_id wasn't already deleted
-        if source_id not in json_data:
-            continue
-
-        # Transfer competitions
-        for comp_key, comp_data in json_data[source_id]["competitions"].items():
-            if comp_key in json_data[target_id]["competitions"]:
-                if comp_data["points"] > json_data[target_id]["competitions"][comp_key]["points"]:
-                    json_data[target_id]["competitions"][comp_key] = comp_data
-            else:
-                json_data[target_id]["competitions"][comp_key] = comp_data
-
-        # Delete the duplicate
-        del json_data[source_id]
-
-    # Recalculate total points for the survivor
-    target_comps = json_data[target_id]["competitions"]
-    for k in target_comps:
-        target_comps[k]["counts"] = False
-
-    top_comps = sorted(target_comps.items(), key=lambda x: x[1]["points"], reverse=True)[:4]
-
-    total_points = 0
-    for comp_key, comp_data in top_comps:
-        target_comps[comp_key]["counts"] = True
-        total_points += comp_data["points"]
-
-    json_data[target_id]["total_points"] = round(total_points, 2)
-    print(f"✅ Successfully merged into {target_id}.")
-
-
-def check_duplicate_athletes(json_data):
-    name_map = _find_duplicate_athletes(json_data)
-
-    # 2. Iterate through the map
-    for key, ids in name_map.items():
-        # Filter IDs to ensure they actually still exist in json_data
-        # (This protects against cases where an ID was deleted in a previous merge)
-        unique_ids = [cid for cid in ids if cid in json_data]
-
-        if len(unique_ids) > 1:
-                is_merge, target_id = _duplicate_athletes_user_interaction(key, unique_ids)
-
-                if is_merge and target_id in unique_ids:
-                    _merge_duplicate_athletes(unique_ids, target_id, json_data)
-                else:
-                    print("Cancelled merge. Skipping...")
-
-
-def normalize_gender(gender):
-    gender = gender.strip().upper()
-
-    if gender == "W":   # normalize "W" to "F"
+def normalize_gender(gender, resolver):
+    gender = str(gender).strip().upper()
+    if gender == "W":
         gender = "F"
 
     while len(gender) > 1 or gender not in ["M", "F"]:
-        print(f"\n⚠️ Invalid Gender found: '{gender}'")
-        gender = input("Please enter a valid gender ('M' or 'F'): ").strip().upper()
+        gender = resolver.resolve_invalid_gender(gender)
 
     return gender
 
 
-def normalize_nationality(nationality, info):
+def normalize_nationality(nationality, info, resolver):
     if pd.isna(nationality) or not isinstance(nationality, str):
         nationality = ""
     else:
@@ -382,37 +246,76 @@ def normalize_nationality(nationality, info):
         nationality = replacements[nationality]
 
     while len(nationality) != 3:
-        print(f"\n⚠️ Invalid Nationality length: '{nationality}' for {info}")
-        nationality = input("Please enter a valid 3-letter IOC country code (e.g., SUI): ").strip().upper()
+        nationality = resolver.resolve_invalid_nationality(nationality, info)
         if nationality in replacements:
             nationality = replacements[nationality]
 
     return nationality
 
 
-def extract_year(date_val):
-    if pd.isna(date_val):
-        return 0
+def _find_duplicate_athletes(athletes_dict):
+    name_map = defaultdict(set)
+    # Build the map using a sorted key to handle swapped names automatically
+    for civl_id, athlete in athletes_dict.items():
+        name = athlete.name.strip().lower()
+        first_name = athlete.first_name.strip().lower()
+        sorted_key = tuple(sorted([name, first_name]))
+        name_map[sorted_key].add(civl_id)
 
-    # If Pandas already successfully parsed it as a datetime object
-    if hasattr(date_val, 'year'):
-        return date_val.year
+    return name_map
 
-    date_str = str(date_val).strip()
 
-    try:
-        # Check if it's in YYYY-MM-DD format
-        if '-' in date_str:
-            # Splits "1996-09-21 00:00:00" into ["1996", "09", "21 00:00:00"]
-            return int(date_str.split('-')[0])
+def check_duplicate_athletes(athletes_dict, resolver):
+    name_map = _find_duplicate_athletes(athletes_dict)
 
-        # Check if it's in DD/MM/YYYY format
-        elif '/' in date_str:
-            # Splits "21/09/1996" into ["21", "09", "1996"]
-            return int(date_str.split('/')[-1])
+    for key, ids in name_map.items():
+        unique_ids = [cid for cid in ids if cid in athletes_dict]
 
-    except ValueError:
-        print(f"⚠️ Unrecognized date format: '{date_str}'. Unable to extract year.")
+        if len(unique_ids) > 1:
+            name_title = f"{key[0].title()} {key[1].title()}"
+            is_merge, target_id = resolver.resolve_duplicate_merge(name_title, unique_ids)
 
-    return 0
+            if is_merge and target_id in unique_ids:
+                _merge_duplicate_athletes(unique_ids, target_id, athletes_dict)
+            elif is_merge:
+                print("Invalid target ID entered. Skipping merge...")
+            else:
+                print("Cancelled merge. Skipping...")
 
+
+def _merge_duplicate_athletes(unique_ids, target_id, athletes_dict):
+    source_ids = [cid for cid in unique_ids if cid != target_id]
+    target_athlete = athletes_dict[target_id]
+
+    for source_id in source_ids:
+        if source_id not in athletes_dict:
+            continue
+
+        source_athlete = athletes_dict[source_id]
+
+        # Transfer competitions
+        for comp_key, comp_data in source_athlete.competitions.items():
+            if comp_key in target_athlete.competitions:
+                # Keep the higher score
+                if comp_data.points > target_athlete.competitions[comp_key].points:
+                    target_athlete.competitions[comp_key] = comp_data
+            else:
+                target_athlete.competitions[comp_key] = comp_data
+
+        # Delete the duplicate record
+        del athletes_dict[source_id]
+
+    # Recalculate total points for the survivor by resetting counts
+    for k in target_athlete.competitions:
+        target_athlete.competitions[k].counts = False
+
+    # Get the top 4 comps
+    top_comps = sorted(target_athlete.competitions.items(), key=lambda x: x[1].points, reverse=True)[:4]
+
+    total_points = 0
+    for comp_key, comp_data in top_comps:
+        target_athlete.competitions[comp_key].counts = True
+        total_points += comp_data.points
+
+    target_athlete.total_points = round(total_points, 2)
+    print(f"✅ Successfully merged into {target_id}.")

@@ -9,6 +9,16 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.colors import grey
 from helpers.config import LOGO_PATH, INFO_TEXT, CURRENT_YEAR
 
+PDF_CONFIG = {
+    "col_widths_base": [20, 40, 135, 20, 30, 140],
+    "col_width_comp": 30,
+    "col_width_total": 35,
+    "row_height_header": 155,
+    "highlight_color": colors.Color(red=172/255, green=220/255, blue=149/255, alpha=0.6),
+    "grid_color": colors.black,
+    "grid_thickness": 0.5,
+    "border_thickness": 1.5,
+}
 
 def _extract_necessary_info_for_pdf(athlete_data: dict, competitions: list, civil_id):
     row = {
@@ -91,9 +101,6 @@ class RotatedHeader(Flowable):
 
     def wrap(self, availWidth, availHeight):
         return self.width, self.height
-
-
-
 
 def generate_single_pdf(json_data: dict, competition_json: dict, df: pd.DataFrame, titel: str, path: str):
     doc = SimpleDocTemplate(str(path), pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=30, bottomMargin=20)
@@ -178,13 +185,17 @@ def generate_single_pdf(json_data: dict, competition_json: dict, df: pd.DataFram
         table_data.append(row_data)
 
     # Build the table
-    col_widths = [20, 40, 135, 20, 30, 140] + [30] * len(competitions) + [35]
-    row_heights = [155] + [None] * (len(table_data) - 1)
+    col_widths = PDF_CONFIG["col_widths_base"] + \
+                 [PDF_CONFIG["col_width_comp"]] * len(competitions) + \
+                 [PDF_CONFIG["col_width_total"]]
+
+    row_heights = [PDF_CONFIG["row_height_header"]] + [None] * (len(table_data) - 1)
+
     table = Table(table_data, colWidths=col_widths, rowHeights=row_heights, repeatRows=1)
 
     style = TableStyle([
         # Basic grid
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("GRID", (0, 0), (-1, -1), PDF_CONFIG["grid_thickness"], PDF_CONFIG["grid_color"]),
 
         # Header styling
         ("ALIGN", (0, 0), (-1, 0), "CENTER"),
@@ -192,38 +203,33 @@ def generate_single_pdf(json_data: dict, competition_json: dict, df: pd.DataFram
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
 
         # Body alignment
-
-      ("ALIGN", (0, 1), (0, -1), "CENTER"),  # Rank
-      ("ALIGN", (1, 1), (1, -1), "LEFT"),    # Civil id
-      ("ALIGN", (2, 1), (2, -1), "LEFT"),    # Name
-      ("ALIGN", (3, 1), (4, -1), "CENTER"),  # Gender and Nationality
-      ("ALIGN", (5, 1), (5, -1), "LEFT"),    # Glider
-      ("ALIGN", (6, 1), (-1, -1), "CENTER"), # Competitions + Total Points
-
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),  # Rank
+        ("ALIGN", (1, 1), (1, -1), "LEFT"),    # Civil id
+        ("ALIGN", (2, 1), (2, -1), "LEFT"),    # Name
+        ("ALIGN", (3, 1), (4, -1), "CENTER"),  # Gender and Nationality
+        ("ALIGN", (5, 1), (5, -1), "LEFT"),    # Glider
+        ("ALIGN", (6, 1), (-1, -1), "CENTER"), # Competitions + Total Points
 
         # Bold outer border
-        ("BOX", (0, 0), (-1, -1), 1.5, colors.black),
+        ("BOX", (0, 0), (-1, -1), PDF_CONFIG["border_thickness"], PDF_CONFIG["grid_color"]),
 
         # Bold line after header row
-        ("LINEBELOW", (0, 0), (-1, 0), 1.5, colors.black),
+        ("LINEBELOW", (0, 0), (-1, 0), PDF_CONFIG["border_thickness"], PDF_CONFIG["grid_color"]),
 
         # Bold vertical line after sixth column (Glider)
-        ("LINEAFTER", (5, 0), (5, -1), 1.5, colors.black),
+        ("LINEAFTER", (5, 0), (5, -1), PDF_CONFIG["border_thickness"], PDF_CONFIG["grid_color"]),
 
         # Bold vertical line before last column (Total Points)
-        ("LINEBEFORE", (-1, 0), (-1, -1), 1.5, colors.black),
+        ("LINEBEFORE", (-1, 0), (-1, -1), PDF_CONFIG["border_thickness"], PDF_CONFIG["grid_color"]),
     ])
-
-    highlight_color = colors.Color(red=172/255, green=220/255, blue=149/255, alpha = 0.6)
-
 
     # Light grey background for alternating rows (excluding header)
     for i in range(1, len(table_data)):
-        if i % 2 == 0:  # Even-numbered row (index starts at 0)
+        if i % 2 == 0:
             style.add("BACKGROUND", (0, i), (-1, i), colors.whitesmoke)
 
     for r, c in highlight_cells:
-        style.add("BACKGROUND", (c, r), (c, r), highlight_color)
+        style.add("BACKGROUND", (c, r), (c, r), PDF_CONFIG["highlight_color"])
 
     table.setStyle(style)
 
