@@ -156,6 +156,23 @@ def main():
     args = parse_arguments()
     print(f"Base Directory: {BASE_DIR}\nData Directory: {DATA_DIR}")
 
+    # Ensure all necessary directories exist
+    directories_to_create = [
+        RESULTS_DIR,
+        INTERMEDIATE_DIR,
+        OUTPUT_DIR,
+        COMPETITION_PATH.parent,
+        JSON_PATH.parent
+    ]
+    for directory in directories_to_create:
+        directory.mkdir(parents=True, exist_ok=True)
+
+    # Initialize empty JSON files if they don't exist yet
+    if not COMPETITION_PATH.exists():
+        save_json({}, COMPETITION_PATH)
+    if not JSON_PATH.exists():
+        save_json({}, JSON_PATH)
+
     competition_json = load_json(COMPETITION_PATH)
     resolver = CLIConflictResolver()
 
