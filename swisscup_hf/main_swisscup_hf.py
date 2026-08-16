@@ -51,20 +51,25 @@ def process_excel_files(json_keys: list, excel_files: list, results_path: str, j
 
         num_part, df = add_points_to_data(df, num_participants)
 
-        # removing possible blanc spaces around civil id
-        df['civl_id'] = df['civl_id'].astype(str).str.strip()
+        # removing possible blanc spaces and .0 float artifacts around civil id
+        df['civl_id'] = df['civl_id'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 
         fake_id_counter = get_highest_fake_civil_id_already_in_use(json_data)
 
         def replace_zero_with_fake(cid):
-            global fake_id_counter
-            if cid == "0":
+            nonlocal fake_id_counter
+
+            # Safely cast to string and strip whitespace
+            cid_str = str(cid).strip()
+
+            # Check for "nan", "0", or empty strings
+            if cid_str.lower() == "nan" or cid_str in ["0", "", "none"]:
                 new_cid = f"ZZ{fake_id_counter:03d}"  # e.g. ZZ001, ZZ002
                 fake_id_counter += 1
                 return new_cid
-            return cid
+            return cid_str
 
-        # Replace civil id's "0" with a fake ID
+        # Replace civil id's "0", "nan", or missing values with a fake ID
         df['civl_id'] = df['civl_id'].apply(replace_zero_with_fake)
 
         # remove trailing blank spaces
