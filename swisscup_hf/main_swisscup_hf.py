@@ -109,7 +109,7 @@ def get_or_register_competition_key(filename: str, competition_json: dict, resol
     # 2. Ask user via Resolver
     similar_keys = sorted(
         [k for k in competition_json.keys() if k.lower() in filename.lower()], 
-        key=len, 
+        key=len,
         reverse=True
     )
     comp_key, new_config = resolver.resolve_unknown_competition(filename, similar_keys, competition_json)
@@ -124,15 +124,15 @@ def get_or_register_competition_key(filename: str, competition_json: dict, resol
     return comp_key
 
 
-def should_process_competition(comp_key: str, competition_json: dict, args: argparse.Namespace) -> bool:
+def should_process_competition(comp_key: str, is_already_registered: bool, args: argparse.Namespace) -> bool:
     """Determines if a competition should be processed based on args and current state."""
     if args.comps and comp_key not in args.comps:
         return False
 
     is_explicitly_requested = args.comps and comp_key in args.comps
-    is_processed = competition_json.get(comp_key, {}).get("num_participants", 0) > 0
 
-    if is_processed and not (args.force or is_explicitly_requested):
+    # If it was already in the JSON before running, skip unless forced or explicitly requested
+    if is_already_registered and not (args.force or is_explicitly_requested):
         return False
 
     return True
@@ -144,13 +144,25 @@ def discover_files_to_process(available_files: list, competition_json: dict, arg
 
     for filepath in sorted(available_files):
         filename = filepath.name
-        comp_key = get_or_register_competition_key(filename, competition_json, resolver)
+
+        # 1. Check if the filename ALREADY exists before registering
+        existing_key = None
+        for key, data in competition_json.items():
+            if data.get("filename") == filename:
+                existing_key = key
+                break
+
+        is_already_registered = existing_key is not None
+
+        # 2. If we found it, use it. If not, prompt the user to register it.
+        comp_key = existing_key or get_or_register_competition_key(filename, competition_json, resolver)
 
         if not comp_key:
             print(f"⏭️  Skipping '{filename}'.")
             continue
 
-        if not should_process_competition(comp_key, competition_json, args):
+        # 3. Evaluate whether to process based on prior registration status
+        if not should_process_competition(comp_key, is_already_registered, args):
             print(f"⏩ Skipping '{filename}' (already processed). Use --force to reprocess.")
             continue
 
