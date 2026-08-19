@@ -24,7 +24,7 @@ def renaming_pandas_columns(df: pd.DataFrame):
 
 def replace_zero_with_fake(cid, fake_id_counter: int):
     cid_str = str(cid).strip()
-    if cid_str.lower() == "nan" or cid_str in ["0", "", "none"]:
+    if cid_str.lower() == "nan" or cid_str in ["0", "", "none", "-"]:
         return f"ZZ{fake_id_counter:03d}"
     return cid_str
 

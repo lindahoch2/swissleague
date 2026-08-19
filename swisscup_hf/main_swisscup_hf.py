@@ -40,6 +40,7 @@ def get_or_update_participants(comp_key, competition_json, df_len):
     return num_participants
 
 def process_excel_files(json_keys, excel_files, results_path, athletes_dict, competition_json, resolver):
+    # Get the starting counter for the whole batch
     fake_id_counter = get_highest_fake_civil_id_already_in_use(athletes_dict)
 
     for comp_key, excel_file in zip(json_keys, excel_files):
@@ -54,11 +55,25 @@ def process_excel_files(json_keys, excel_files, results_path, athletes_dict, com
         df = clean_dataframe_text(df)
 
         # Inject fake IDs
-        df['civl_id'] = df['civl_id'].apply(lambda cid: replace_zero_with_fake(cid, fake_id_counter))
-        fake_id_counter = get_highest_fake_civil_id_already_in_use(athletes_dict) # Update counter
+        new_civl_ids = []
+        for cid in df['civl_id']:
+            new_cid = replace_zero_with_fake(cid, fake_id_counter)
+
+            # If the ID was actually replaced (assuming your fake IDs start with 'ZZ')
+            if str(new_cid).startswith('ZZ') and not str(cid).startswith('ZZ'):
+                # Increment the counter so the NEXT missing athlete gets ZZ069, ZZ070, etc.
+                fake_id_counter += 1
+
+            new_civl_ids.append(new_cid)
+
+        # Apply the sequentially updated IDs back to the DataFrame
+        df['civl_id'] = new_civl_ids
 
         # 3. Load
         add_data_to_json(athletes_dict, df, comp_key, resolver)
+
+        # Update counter for the next Excel file to ensure no overlaps
+        fake_id_counter = get_highest_fake_civil_id_already_in_use(athletes_dict)
 
 def generate_pdfs(competition_json: dict, json_data: dict, comp_key: str):
     all_competitions = competition_json.keys()
