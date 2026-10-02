@@ -25,8 +25,8 @@ class CLIConflictResolver:
             if choice == '3': return input("Enter custom glider name: ").strip()
             print("Invalid input.")
 
-    def resolve_invalid_gender(self, invalid_gender: str) -> str:
-        print(f"\n⚠️ Invalid Gender found: '{invalid_gender}'")
+    def resolve_invalid_gender(self, athlete, invalid_gender: str) -> str:
+        print(f"\n⚠️ Invalid Gender found for {athlete}: '{invalid_gender}'")
         return input("Please enter a valid gender ('M' or 'F'): ").strip().upper()
 
     def resolve_invalid_nationality(self, invalid_nat: str, info: str) -> str:

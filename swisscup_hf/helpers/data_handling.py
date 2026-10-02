@@ -170,7 +170,7 @@ def data_cleaning(athletes_dict: dict, resolver):
     for civl_id, athlete in athletes_dict.items():
         athlete_info = f"{civl_id}: {athlete.name} {athlete.first_name}"
         athlete.glider = _normalize_glider_name(athlete.glider)
-        athlete.gender = normalize_gender(athlete.gender, resolver)
+        athlete.gender = normalize_gender(athlete_info, athlete.gender, resolver)
         athlete.nat = normalize_nationality(athlete.nat, athlete_info, resolver)
 
     check_duplicate_athletes(athletes_dict, resolver)
@@ -243,13 +243,13 @@ def _normalize_glider_name(glider):
     return glider
 
 
-def normalize_gender(gender, resolver):
+def normalize_gender(athlete, gender, resolver):
     gender = str(gender).strip().upper()
     if gender == "W":
         gender = "F"
 
     while len(gender) > 1 or gender not in ["M", "F"]:
-        gender = resolver.resolve_invalid_gender(gender)
+        gender = resolver.resolve_invalid_gender(athlete, gender)
 
     return gender
 
