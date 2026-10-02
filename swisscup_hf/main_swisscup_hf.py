@@ -1,4 +1,5 @@
 import argparse
+import logging
 import pandas as pd
 from helpers.config import *
 from helpers.utils import load_json, save_json
@@ -39,41 +40,63 @@ def get_or_update_participants(comp_key, competition_json, df_len):
         save_json(competition_json, COMPETITION_PATH)
     return num_participants
 
-def process_excel_files(json_keys, excel_files, results_path, athletes_dict, competition_json, resolver):
-    # Get the starting counter for the whole batch
+def process_single_excel_file(comp_key, excel_file, results_path, athletes_dict, competition_json, resolver):
+    """Processes a single competition Excel file safely."""
+    print(f"Processing {excel_file} (Key: {comp_key})...")
     fake_id_counter = get_highest_fake_civil_id_already_in_use(athletes_dict)
 
+    # 1. Extract
+    df = read_and_standardize_excel(results_path, excel_file)
+
+    # 2. Transform
+    num_participants = get_or_update_participants(comp_key, competition_json, len(df))
+    _, df = add_points_to_data(df, num_participants)
+    df = clean_dataframe_text(df)
+
+    # Inject fake IDs
+    new_civl_ids = []
+    for cid in df['civl_id']:
+        new_cid = replace_zero_with_fake(cid, fake_id_counter)
+
+        # If the ID was actually replaced (assuming your fake IDs start with 'ZZ')
+        if str(new_cid).startswith('ZZ') and not str(cid).startswith('ZZ'):
+            # Increment the counter so the NEXT missing athlete gets ZZ069, ZZ070, etc.
+            fake_id_counter += 1
+
+        new_civl_ids.append(new_cid)
+
+    # Apply the sequentially updated IDs back to the DataFrame
+    df['civl_id'] = new_civl_ids
+
+    # 3. Load into athletes dictionary
+    add_data_to_json(athletes_dict, df, comp_key, resolver)
+
+
+def process_excel_files(json_keys, excel_files, results_path, athletes_dict, competition_json, resolver):
+    """Iterates through each file, resetting config if an error occurs and continuing to the next."""
+    successful_keys = []
+
     for comp_key, excel_file in zip(json_keys, excel_files):
-        print(f"Processing {excel_file} (Key: {comp_key})...")
+        try:
+            process_single_excel_file(
+                comp_key, excel_file, results_path, athletes_dict, competition_json, resolver
+            )
+            successful_keys.append(comp_key)
+        except Exception as e:
+            logging.error(f"❌ Error processing competition '{comp_key}' ({excel_file}): {e}", exc_info=True)
+            print(f"\n❌ Error processing '{comp_key}' ({excel_file}): {e}")
 
-        # 1. Extract
-        df = read_and_standardize_excel(results_path, excel_file)
+            # Reset competition config on failure
+            if comp_key in competition_json:
+                competition_json[comp_key]["num_participants"] = 0
+                competition_json[comp_key].pop("filename", None)
+                save_json(competition_json, COMPETITION_PATH)
+                print(f"🔄 Reset '{comp_key}' in competition JSON (num_participants = 0, removed filename).")
 
-        # 2. Transform
-        num_participants = get_or_update_participants(comp_key, competition_json, len(df))
-        _, df = add_points_to_data(df, num_participants)
-        df = clean_dataframe_text(df)
+            print(f"⚠️ Skipping competition '{comp_key}' due to error and moving to the next.\n")
 
-        # Inject fake IDs
-        new_civl_ids = []
-        for cid in df['civl_id']:
-            new_cid = replace_zero_with_fake(cid, fake_id_counter)
+    return successful_keys
 
-            # If the ID was actually replaced (assuming your fake IDs start with 'ZZ')
-            if str(new_cid).startswith('ZZ') and not str(cid).startswith('ZZ'):
-                # Increment the counter so the NEXT missing athlete gets ZZ069, ZZ070, etc.
-                fake_id_counter += 1
-
-            new_civl_ids.append(new_cid)
-
-        # Apply the sequentially updated IDs back to the DataFrame
-        df['civl_id'] = new_civl_ids
-
-        # 3. Load
-        add_data_to_json(athletes_dict, df, comp_key, resolver)
-
-        # Update counter for the next Excel file to ensure no overlaps
-        fake_id_counter = get_highest_fake_civil_id_already_in_use(athletes_dict)
 
 def generate_pdfs(competition_json: dict, json_data: dict, comp_key: str):
     all_competitions = competition_json.keys()
@@ -108,7 +131,7 @@ def get_or_register_competition_key(filename: str, competition_json: dict, resol
 
     # 2. Ask user via Resolver
     similar_keys = sorted(
-        [k for k in competition_json.keys() if k.lower() in filename.lower()], 
+        [k for k in competition_json.keys() if k.lower() in filename.lower()],
         key=len,
         reverse=True
     )
@@ -223,20 +246,33 @@ def main():
     raw_json = load_json(JSON_PATH)
     athletes_dict = {civl_id: Athlete.from_dict(civl_id, data) for civl_id, data in raw_json.items()}
 
-    # 3. Process and Clean
-    process_excel_files(keys_to_process, files_to_process, RESULTS_DIR, athletes_dict, competition_json, resolver)
+    # 3. Process each competition with fault isolation
+    successful_keys = process_excel_files(
+        keys_to_process, files_to_process, RESULTS_DIR, athletes_dict, competition_json, resolver
+    )
+
+    if not successful_keys:
+        print("\n❌ All selected competitions failed during processing. Exiting without saving.")
+        return
+
+    # Clean data across successfully ingested entries
     data_cleaning(athletes_dict, resolver)
 
-    # 4. Save and Generate Output
+    # 4. Save and Generate Output for the successful competitions
     updated_raw_json = {civl_id: ath.to_dict() for civl_id, ath in athletes_dict.items()}
     save_json(updated_raw_json, JSON_PATH)
 
-    last_key = keys_to_process[-1]
+    last_key = successful_keys[-1]
     additional_json_path = INTERMEDIATE_DIR / f"swissleague_data_2026_{last_key}.json"
     save_json(updated_raw_json, additional_json_path)
-    print(f"Additional JSON saved to: {additional_json_path}")
+    print(f"\n✅ Additional JSON saved to: {additional_json_path}")
 
-    generate_pdfs(competition_json, updated_raw_json, last_key)
+    # Generate PDFs
+    try:
+        generate_pdfs(competition_json, updated_raw_json, last_key)
+        print(f"✅ PDFs successfully generated for '{last_key}'.")
+    except Exception as e:
+        logging.error(f"❌ Error generating PDFs: {e}", exc_info=True)
 
 
 if __name__ == "__main__":
