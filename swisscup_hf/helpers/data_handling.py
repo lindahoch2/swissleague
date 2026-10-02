@@ -6,6 +6,7 @@ def renaming_pandas_columns(df: pd.DataFrame):
     # Catch different column naming for birthdate and rename to a consistent name
     df = df.rename(columns={'Birthdate': 'Birth Date'})
     df = df.rename(columns={'Date of birth': 'Birth Date'})
+    df = df.rename(columns={'Date of Birth': 'Birth Date'})
 
     if 'Glider' not in df.columns:
         # Dynamically find the columns, allowing for slight variations (like 'Manufacturerb')
