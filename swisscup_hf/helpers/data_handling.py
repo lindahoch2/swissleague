@@ -346,8 +346,12 @@ def _merge_duplicate_athletes(unique_ids, target_id, athletes_dict):
 
 def clean_dataframe_text(df):
     df['civl_id'] = df['civl_id'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-    df['name'] = df['name'].str.strip().str.title()
-    df['first_name'] = df['first_name'].str.strip().str.title()
+
+    # Regex pattern matches space + (XX) where XX is 1 or more letters/characters at the end of the string
+    pattern = r'\s*\([A-Za-z]+\)$'
+
+    df['name'] = df['name'].astype(str).str.replace(pattern, '', regex=True).str.strip().str.title()
+    df['first_name'] = df['first_name'].astype(str).str.replace(pattern, '', regex=True).str.strip().str.title()
 
     # Apply normalization to incoming Excel data immediately
     df['glider'] = df['glider'].apply(_normalize_glider_name)
