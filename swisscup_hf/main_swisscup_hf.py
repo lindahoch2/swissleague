@@ -22,6 +22,9 @@ def read_and_standardize_excel(results_path, excel_file):
     df = renaming_pandas_columns(df)
     df = df[['Rank', 'First Name', 'Last Name', 'Gender', 'CIVL ID', 'Nat', 'Glider', 'Birth Date']]
     df.columns = ['rank', 'first_name', 'name', 'gender', 'civl_id', 'nat', 'glider', 'birth_day']
+
+    # Cast rank to numeric
+    df['rank'] = pd.to_numeric(df['rank'], errors='coerce')
     df['birth_year'] = df['birth_day'].apply(extract_year)
     return df
 
